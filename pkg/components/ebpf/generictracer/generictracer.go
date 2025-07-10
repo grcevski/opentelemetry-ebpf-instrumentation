@@ -322,6 +322,10 @@ func (p *Tracer) KProbes() map[string]ebpfcommon.ProbeDesc {
 			Start:    p.bpfObjects.BeylaKprobeUnixStreamSendmsg,
 			End:      p.bpfObjects.BeylaKretprobeUnixStreamSendmsg,
 		},
+		"do_vfs_ioctl": {
+			Required: true,
+			Start:    p.bpfObjects.BeylaKprobeDoVfsIoctl,
+		},
 	}
 
 	if p.cfg.EBPF.ContextPropagation != config.ContextPropagationDisabled {
