@@ -69,19 +69,21 @@ int BPF_KPROBE(
         return 0;
     }
 
+    bpf_dbg_printk("op = %d, cmd = %d", op, op_cmd);
+
     pid_connection_info_t p_conn = {0};
     bpf_probe_read(&p_conn.conn, sizeof(connection_info_t), arg + 1);
     u16 orig_dport = p_conn.conn.d_port;
     sort_connection_info(&p_conn.conn);
     p_conn.pid = pid_from_pid_tgid(id);
 
-    // if (is_empty_connection_info(&p_conn.conn)) {
-    //     ssl_pid_connection_info_t *l = bpf_map_lookup_elem(&pid_tid_to_conn, &id);
-    //     bpf_dbg_printk("lookup for empty connection info %llx", l);
-    //     if (l) {
-    //         __builtin_memcpy(&p_conn, &l->p_conn, sizeof(pid_connection_info_t));
-    //     }
-    // }
+    if (is_empty_connection_info(&p_conn.conn)) {
+        ssl_pid_connection_info_t *l = bpf_map_lookup_elem(&pid_tid_to_conn, &id);
+        bpf_dbg_printk("lookup for empty connection info %llx", l);
+        if (l) {
+            __builtin_memcpy(&p_conn, &l->p_conn, sizeof(pid_connection_info_t));
+        }
+    }
 
     u32 len = 0;
     bpf_probe_read(&len, sizeof(u32), arg + 1 + sizeof(connection_info_t));
@@ -90,7 +92,7 @@ int BPF_KPROBE(
 
     if (len > 0) {
         void *buf = arg + 1 + sizeof(connection_info_t) + sizeof(u32);
-        handle_buf_with_connection(ctx, &p_conn, buf, len, NO_SSL, op, orig_dport);
+        handle_buf_with_connection(ctx, &p_conn, buf, len, WITH_SSL, op, orig_dport);
     }
 
     return 0;
