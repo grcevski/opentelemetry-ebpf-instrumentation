@@ -14,7 +14,7 @@
 
 #include <pid/pid.h>
 
-enum { ioctl_magic_id = 0xb311a };
+enum { ioctl_magic_id = 0x0b10b1 };
 enum {
     ioctl_java_send = 1,
     ioctl_java_recv = 2,
