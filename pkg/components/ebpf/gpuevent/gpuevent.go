@@ -310,7 +310,8 @@ func (p *Tracer) readGPUKernelLaunchIntoSpan(record *ringbuf.Record) (request.Sp
 	// Find the symbol for the kernel launch
 	symbol, ok := p.symForAddr(int32(event.PidInfo.UserPid), event.PidInfo.Ns, event.KernFuncOff)
 	if !ok {
-		return request.Span{}, true, fmt.Errorf("failed to find symbol for kernel launch at address %d, pid %d", event.KernFuncOff, event.PidInfo.UserPid)
+		//return request.Span{}, true, fmt.Errorf("failed to find symbol for kernel launch at address %d, pid %d", event.KernFuncOff, event.PidInfo.UserPid)
+		symbol = "unknown"
 	}
 
 	// Log the GPU Kernel Launch event
@@ -369,6 +370,10 @@ func (p *Tracer) processCudaLibFileInfo(info *exec.FileInfo, lib string, maps []
 
 	if ELF, err = elf.Open(instrPath); err != nil {
 		p.log.Error("can't open ELF file in", "file", instrPath, "error", err)
+	}
+
+	if ELF == nil {
+		return nil, nil, false
 	}
 
 	p.log.Debug("Processing symbols", "path", cudaMap.Pathname)
