@@ -261,6 +261,29 @@ static __always_inline void finish_http(http_info_t *info, pid_connection_info_t
     }
 }
 
+static __always_inline void force_finish_http(http_info_t *info, pid_connection_info_t *pid_conn) {
+    if (!http_info_complete(info)) {
+        info->resp_len = 0;
+        info->end_monotime_ns = bpf_ktime_get_ns();
+        info->status = 409;
+    }
+
+    http_info_t *trace = bpf_ringbuf_reserve(&events, sizeof(http_info_t), 0);
+    if (trace) {
+        bpf_dbg_printk("Sending trace %lx, response length %d", info, info->resp_len);
+
+        __builtin_memcpy(trace, info, sizeof(http_info_t));
+        trace->flags = EVENT_K_HTTP_REQUEST;
+        bpf_ringbuf_submit(trace, get_flags());
+    } else {
+        bpf_printk("failed to reserve space in the ringbuf");
+    }
+
+    // bpf_dbg_printk("Terminating trace for pid=%d", pid_from_pid_tgid(pid_tid));
+    // dbg_print_http_connection_info(&info->conn_info); // commented out since GitHub CI doesn't like this call
+    bpf_map_delete_elem(&ongoing_http, pid_conn);
+}
+
 static __always_inline void update_http_sent_len(pid_connection_info_t *pid_conn, int sent_len) {
     http_info_t *info = bpf_map_lookup_elem(&ongoing_http, pid_conn);
     if (info) {
@@ -311,6 +334,22 @@ static __always_inline void finish_possible_delayed_http_request(pid_connection_
     http_info_t *info = bpf_map_lookup_elem(&ongoing_http, pid_conn);
     if (info && info->delayed) {
         finish_http(info, pid_conn);
+    }
+}
+
+static __always_inline void
+force_finish_possible_delayed_http_request(pid_connection_info_t *pid_conn) {
+    if (high_request_volume) {
+        return;
+    }
+    http_info_t *info = bpf_map_lookup_elem(&ongoing_http, pid_conn);
+    if (info) {
+        if (info->delayed) {
+            finish_http(info, pid_conn);
+        } else {
+            bpf_dbg_printk("forcing HTTP event finish");
+            force_finish_http(info, pid_conn);
+        }
     }
 }
 

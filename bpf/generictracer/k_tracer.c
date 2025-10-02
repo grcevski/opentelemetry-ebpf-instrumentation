@@ -584,7 +584,7 @@ int BPF_KPROBE(obi_kprobe_tcp_close, struct sock *sk, long timeout) {
 
     bpf_dbg_printk("=== kprobe tcp_close %d sock %llx ===", id, sk);
 
-    ensure_sent_event(id, &sock_p);
+    force_sent_event(id, &sock_p);
 
     pid_connection_info_t info = {};
 

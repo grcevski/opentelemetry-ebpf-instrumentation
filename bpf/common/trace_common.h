@@ -397,6 +397,10 @@ find_trace_for_client_request_with_t_key(const pid_connection_info_t *p_conn,
 
     if (server_tp && server_tp->valid && valid_trace(server_tp->tp.trace_id)) {
         bpf_dbg_printk("Found existing server tp for client call");
+        unsigned char tp_buf[TP_MAX_VAL_LENGTH];
+        make_tp_string(tp_buf, &server_tp->tp);
+        bpf_d_printk("parent: %s", tp_buf);
+
         __builtin_memcpy(tp->trace_id, server_tp->tp.trace_id, sizeof(tp->trace_id));
         __builtin_memcpy(tp->parent_id, server_tp->tp.span_id, sizeof(tp->parent_id));
         return 1;
