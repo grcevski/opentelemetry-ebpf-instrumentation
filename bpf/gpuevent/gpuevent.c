@@ -1,3 +1,8 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+// Source: https://github.com/facebookincubator/strobelight/blob/5d84bcfdd9abccc615b45a390bfd7bba7097dc51/strobelight/src/profilers/gpuevent_snoop/bpf/gpuevent_snoop.bpf.c
+
 //go:build obi_bpf_ignore
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 // Copyright Grafana Labs
@@ -20,9 +25,11 @@ char LICENSE[] SEC("license") = "Dual MIT/GPL";
 
 const gpu_kernel_launch_t *unused_gpu __attribute__((unused));
 const gpu_malloc_t *unused_gpu1 __attribute__((unused));
+const gpu_memcpy_t *unused_gpu2 __attribute__((unused));
 
 #define EVENT_GPU_KERNEL_LAUNCH 1
 #define EVENT_GPU_MALLOC 2
+#define EVENT_GPU_MEMCPY 3
 
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
@@ -103,6 +110,9 @@ int BPF_KPROBE(handle_cuda_launch,
 
 SEC("uprobe/cudaMalloc")
 int BPF_KPROBE(handle_cuda_malloc, void **devPtr, size_t size) {
+    (void)ctx;
+    (void)devPtr;
+
     u64 id = bpf_get_current_pid_tgid();
 
     if (!valid_pid(id)) {
@@ -119,7 +129,36 @@ int BPF_KPROBE(handle_cuda_malloc, void **devPtr, size_t size) {
 
     e->flags = EVENT_GPU_MALLOC;
     task_pid(&e->pid_info);
-    e->size = (u64)size;
+    e->size = (s64)size;
+
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("uprobe/cudaMemcpyAsync")
+int BPF_KPROBE(handle_cuda_memcpy, void *dst, void *src, size_t size, u8 kind) {
+    (void)ctx;
+    (void)dst;
+    (void)src;
+
+    u64 id = bpf_get_current_pid_tgid();
+
+    if (!valid_pid(id)) {
+        return 0;
+    }
+
+    bpf_dbg_printk("=== cudaMemcpyAsync %llx kind %d ===", id, kind);
+
+    gpu_memcpy_t *e = bpf_ringbuf_reserve(&rb, sizeof(*e), 0);
+    if (!e) {
+        bpf_dbg_printk("Failed to allocate ringbuf entry");
+        return 0;
+    }
+
+    e->flags = EVENT_GPU_MEMCPY;
+    task_pid(&e->pid_info);
+    e->size = (s64)size;
+    e->kind = kind;
 
     bpf_ringbuf_submit(e, 0);
     return 0;

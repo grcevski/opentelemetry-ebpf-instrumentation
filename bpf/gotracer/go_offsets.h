@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 
 #include <bpfcore/utils.h>
@@ -75,6 +78,13 @@ typedef enum {
     _tracer_delegate_pos,
     _tracer_attribute_opt_off,
     _error_string_off,
+    // go jsonrpc
+    _jsonrpc_request_header_service_method_pos,
+    // go mongodb
+    _mongo_conn_name_pos,
+    _mongo_op_name_pos,
+    _mongo_db_name_pos,
+    _mongo_op_name_new,
     _last_go_offset,
 } go_offset_const;
 

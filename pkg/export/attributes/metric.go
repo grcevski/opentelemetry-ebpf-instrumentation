@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package attributes
 
 import "strings"
@@ -21,15 +24,15 @@ type Name struct {
 }
 
 var (
-	BeylaNetworkFlow = Name{
-		Section: "beyla.network.flow",
-		Prom:    "beyla_network_flow_bytes_total",
-		OTEL:    "beyla.network.flow.bytes",
+	NetworkFlow = Name{
+		Section: "obi.network.flow",
+		Prom:    "obi_network_flow_bytes_total",
+		OTEL:    "obi.network.flow.bytes",
 	}
-	BeylaNetworkInterZone = Name{
-		Section: "beyla.network.inter.zone",
-		Prom:    "beyla_network_inter_zone_bytes_total",
-		OTEL:    "beyla.network.inter.zone.bytes",
+	NetworkInterZone = Name{
+		Section: "obi.network.inter.zone",
+		Prom:    "obi_network_inter_zone_bytes_total",
+		OTEL:    "obi.network.inter.zone.bytes",
 	}
 	HTTPServerRequestSize = Name{
 		Section: "http.server.request.body.size",
@@ -106,11 +109,21 @@ var (
 		Prom:    "gpu_memory_allocations_bytes_total",
 		OTEL:    "gpu.memory.allocations",
 	}
+	GPUMemoryCopies = Name{
+		Section: "gpu.memory.copies",
+		Prom:    "gpu_memory_copies_bytes_total",
+		OTEL:    "gpu.memory.copies",
+	}
+	DNSLookupDuration = Name{
+		Section: "dns.lookup.duration",
+		Prom:    "dns_lookup_duration_seconds",
+		OTEL:    "dns.lookup.duration",
+	}
 )
 
 // normalizeMetric will facilitate the user-input in the attributes.enable section.
 // The user can specify the Prometheus or OTEL notation, and can include or not
-// the units and aggregations for the metrics. Beyla will accept all the inputs
+// the units and aggregations for the metrics. OBI will accept all the inputs
 // as long as the metric name is recorgnisable.
 func normalizeMetric(name Section) Section {
 	nameStr := strings.ReplaceAll(string(name), "_", ".")

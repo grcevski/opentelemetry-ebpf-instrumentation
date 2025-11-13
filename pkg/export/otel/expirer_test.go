@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package otel
 
 import (
@@ -9,22 +12,23 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/app/request"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/exec"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/netolly/ebpf"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/pipe/global"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/svc"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes"
-	attr "github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes/names"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/instrumentations"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/pipe/msg"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/test/collector"
+	"go.opentelemetry.io/obi/internal/test/collector"
+	"go.opentelemetry.io/obi/pkg/appolly/app/request"
+	"go.opentelemetry.io/obi/pkg/appolly/app/svc"
+	"go.opentelemetry.io/obi/pkg/appolly/discover/exec"
+	"go.opentelemetry.io/obi/pkg/export/attributes"
+	attr "go.opentelemetry.io/obi/pkg/export/attributes/names"
+	"go.opentelemetry.io/obi/pkg/export/instrumentations"
+	"go.opentelemetry.io/obi/pkg/export/otel/otelcfg"
+	"go.opentelemetry.io/obi/pkg/internal/netolly/ebpf"
+	"go.opentelemetry.io/obi/pkg/pipe/global"
+	"go.opentelemetry.io/obi/pkg/pipe/msg"
 )
 
 const timeout = 20 * time.Second
 
 func TestNetMetricsExpiration(t *testing.T) {
-	defer restoreEnvAfterExecution()()
+	defer otelcfg.RestoreEnvAfterExecution()()
 	ctx := t.Context()
 
 	otlp, err := collector.Start(ctx)
@@ -34,20 +38,23 @@ func TestNetMetricsExpiration(t *testing.T) {
 	timeNow = now.Now
 
 	metrics := msg.NewQueue[[]*ebpf.Record](msg.ChannelBufferLen(20))
+	cfg := &otelcfg.MetricsConfig{
+		Interval:        50 * time.Millisecond,
+		CommonEndpoint:  otlp.ServerEndpoint,
+		MetricsProtocol: otelcfg.ProtocolHTTPProtobuf,
+		Features:        []string{otelcfg.FeatureNetwork},
+		TTL:             3 * time.Minute,
+		Instrumentations: []string{
+			instrumentations.InstrumentationALL,
+		},
+	}
 	otelExporter, err := NetMetricsExporterProvider(
-		&global.ContextInfo{}, &NetMetricsConfig{
-			Metrics: &MetricsConfig{
-				Interval:        50 * time.Millisecond,
-				CommonEndpoint:  otlp.ServerEndpoint,
-				MetricsProtocol: ProtocolHTTPProtobuf,
-				Features:        []string{FeatureNetwork},
-				TTL:             3 * time.Minute,
-				Instrumentations: []string{
-					instrumentations.InstrumentationALL,
-				},
-			}, SelectorCfg: &attributes.SelectorConfig{
+		&global.ContextInfo{OTELMetricsExporter: &otelcfg.MetricsExporterInstancer{
+			Cfg: cfg,
+		}}, &NetMetricsConfig{
+			Metrics: cfg, SelectorCfg: &attributes.SelectorConfig{
 				SelectionCfg: attributes.Selection{
-					attributes.BeylaNetworkFlow.Section: attributes.InclusionLists{
+					attributes.NetworkFlow.Section: attributes.InclusionLists{
 						Include: []string{"src.name", "dst.name"},
 					},
 				},
@@ -114,7 +121,7 @@ func TestNetMetricsExpiration(t *testing.T) {
 	// We just know it because OTEL will only sends foo/bar metric.
 	// If this test is flaky: it means it is actually failing
 	// repeating 10 times to make sure that only this metric is forwarded
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		metric := readChan(t, otlp.Records())
 		require.Equal(t, map[string]string{"src.name": "foo", "dst.name": "bar"}, metric.Attributes)
 		require.InEpsilon(t, 369, metric.IntVal, 0.001)
@@ -142,7 +149,7 @@ func TestNetMetricsExpiration(t *testing.T) {
 // (2) by metric set of a given service Attrs
 // this test verifies case 1
 func TestAppMetricsExpiration_ByMetricAttrs(t *testing.T) {
-	defer restoreEnvAfterExecution()()
+	defer otelcfg.RestoreEnvAfterExecution()()
 	ctx := t.Context()
 
 	otlp, err := collector.Start(ctx)
@@ -156,20 +163,22 @@ func TestAppMetricsExpiration_ByMetricAttrs(t *testing.T) {
 
 	metrics := msg.NewQueue[[]request.Span](msg.ChannelBufferLen(20))
 	processEvents := msg.NewQueue[exec.ProcessEvent](msg.ChannelBufferLen(20))
+	cfg := &otelcfg.MetricsConfig{
+		Interval:          50 * time.Millisecond,
+		CommonEndpoint:    otlp.ServerEndpoint,
+		MetricsProtocol:   otelcfg.ProtocolHTTPProtobuf,
+		Features:          []string{otelcfg.FeatureApplication},
+		TTL:               3 * time.Minute,
+		ReportersCacheLen: 100,
+		Instrumentations: []string{
+			instrumentations.InstrumentationALL,
+		},
+	}
 	otelExporter, err := ReportMetrics(
 		&global.ContextInfo{
 			MetricAttributeGroups: g,
-		}, &MetricsConfig{
-			Interval:          50 * time.Millisecond,
-			CommonEndpoint:    otlp.ServerEndpoint,
-			MetricsProtocol:   ProtocolHTTPProtobuf,
-			Features:          []string{FeatureApplication},
-			TTL:               3 * time.Minute,
-			ReportersCacheLen: 100,
-			Instrumentations: []string{
-				instrumentations.InstrumentationALL,
-			},
-		}, &attributes.SelectorConfig{
+			OTELMetricsExporter:   &otelcfg.MetricsExporterInstancer{Cfg: cfg},
+		}, cfg, &attributes.SelectorConfig{
 			SelectionCfg: attributes.Selection{
 				attributes.HTTPServerDuration.Section: attributes.InclusionLists{
 					Include: []string{"url.path", "k8s.app.version"},
@@ -178,7 +187,7 @@ func TestAppMetricsExpiration_ByMetricAttrs(t *testing.T) {
 			ExtraGroupAttributesCfg: map[string][]attr.Name{
 				"k8s_app_meta": {"k8s.app.version"},
 			},
-		}, metrics, processEvents)(ctx)
+		}, request.UnresolvedNames{}, metrics, processEvents)(ctx)
 	require.NoError(t, err)
 
 	go otelExporter(ctx)
@@ -282,7 +291,7 @@ func TestAppMetricsExpiration_ByMetricAttrs(t *testing.T) {
 // (2) by metric set of a given service Attrs
 // this test verifies case 2
 func TestAppMetricsExpiration_BySvcID(t *testing.T) {
-	defer restoreEnvAfterExecution()()
+	defer otelcfg.RestoreEnvAfterExecution()()
 	ctx := t.Context()
 
 	otlp, err := collector.Start(ctx)
@@ -293,24 +302,27 @@ func TestAppMetricsExpiration_BySvcID(t *testing.T) {
 
 	metrics := msg.NewQueue[[]request.Span](msg.ChannelBufferLen(20))
 	processEvents := msg.NewQueue[exec.ProcessEvent](msg.ChannelBufferLen(20))
+	cfg := &otelcfg.MetricsConfig{
+		Interval:          50 * time.Millisecond,
+		CommonEndpoint:    otlp.ServerEndpoint,
+		MetricsProtocol:   otelcfg.ProtocolHTTPProtobuf,
+		Features:          []string{otelcfg.FeatureApplication},
+		TTL:               3 * time.Minute,
+		ReportersCacheLen: 100,
+		Instrumentations: []string{
+			instrumentations.InstrumentationALL,
+		},
+	}
 	otelExporter, err := ReportMetrics(
-		&global.ContextInfo{}, &MetricsConfig{
-			Interval:          50 * time.Millisecond,
-			CommonEndpoint:    otlp.ServerEndpoint,
-			MetricsProtocol:   ProtocolHTTPProtobuf,
-			Features:          []string{FeatureApplication},
-			TTL:               3 * time.Minute,
-			ReportersCacheLen: 100,
-			Instrumentations: []string{
-				instrumentations.InstrumentationALL,
-			},
-		}, &attributes.SelectorConfig{
+		&global.ContextInfo{OTELMetricsExporter: &otelcfg.MetricsExporterInstancer{Cfg: cfg}},
+		cfg,
+		&attributes.SelectorConfig{
 			SelectionCfg: attributes.Selection{
 				attributes.HTTPServerDuration.Section: attributes.InclusionLists{
 					Include: []string{"url.path"},
 				},
 			},
-		}, metrics, processEvents)(ctx)
+		}, request.UnresolvedNames{}, metrics, processEvents)(ctx)
 	require.NoError(t, err)
 
 	go otelExporter(ctx)

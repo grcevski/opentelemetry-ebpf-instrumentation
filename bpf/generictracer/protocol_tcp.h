@@ -1,16 +1,22 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 
 #include <bpfcore/vmlinux.h>
 #include <bpfcore/bpf_helpers.h>
 
 #include <common/common.h>
+#include <common/connection_info.h>
 #include <common/http_types.h>
+#include <common/large_buffers.h>
 #include <common/pin_internal.h>
 #include <common/ringbuf.h>
 #include <common/trace_common.h>
 
 #include <generictracer/protocol_common.h>
 #include <generictracer/protocol_mysql.h>
+#include <generictracer/protocol_postgres.h>
 
 #include <generictracer/maps/ongoing_tcp_req.h>
 #include <generictracer/maps/tcp_req_mem.h>
@@ -25,9 +31,21 @@ static __always_inline tcp_req_t *empty_tcp_req() {
 }
 
 static __always_inline void init_new_trace(tp_info_t *tp) {
+    bpf_d_printk("Generating new traceparent id");
     new_trace_id(tp);
     urand_bytes(tp->span_id, SPAN_ID_SIZE_BYTES);
     __builtin_memset(tp->parent_id, 0, sizeof(tp->span_id));
+
+#ifdef BPF_DEBUG
+    unsigned char tp_buf[TP_MAX_VAL_LENGTH];
+    make_tp_string(tp_buf, tp);
+    bpf_dbg_printk("tp: %s", tp_buf);
+#endif
+}
+
+static __always_inline u8 already_tracked_tcp(const pid_connection_info_t *p_conn) {
+    tcp_req_t *tcp_info = bpf_map_lookup_elem(&ongoing_tcp_req, p_conn);
+    return tcp_info != 0;
 }
 
 static __always_inline void set_tcp_trace_info(
@@ -45,7 +63,6 @@ static __always_inline void set_tcp_trace_info(
     tp_p->req_type = EVENT_TCP_REQUEST;
 
     set_trace_info_for_connection(conn, type, tp_p);
-    bpf_dbg_printk("Set traceinfo for conn");
     dbg_print_http_connection_info(conn);
 
     server_or_client_trace(type, conn, tp_p, ssl, orig_dport);
@@ -96,20 +113,63 @@ static __always_inline void cleanup_tcp_trace_info_if_needed(pid_connection_info
     }
 }
 
-static __always_inline void tcp_send_large_buffer(tcp_req_t *req,
-                                                  pid_connection_info_t *pid_conn,
-                                                  void *u_buf,
-                                                  int bytes_len,
-                                                  u8 direction,
-                                                  enum protocol_type protocol_type) {
+static __always_inline int tcp_send_large_buffer(tcp_req_t *req,
+                                                 pid_connection_info_t *pid_conn,
+                                                 void *u_buf,
+                                                 int bytes_len,
+                                                 u8 direction,
+                                                 enum protocol_type protocol_type,
+                                                 enum large_buf_action action) {
+    int ret = 0;
+
     switch (protocol_type) {
     case k_protocol_type_mysql:
         if (mysql_buffer_size > 0) {
-            mysql_send_large_buffer(req, pid_conn, u_buf, bytes_len, direction);
+            u8 packet_type = infer_packet_type(direction, pid_conn->conn.d_port);
+            ret = mysql_send_large_buffer(
+                req, pid_conn, u_buf, bytes_len, packet_type, direction, action);
         }
+        break;
+    case k_protocol_type_postgres:
+        if (postgres_buffer_size > 0) {
+            u8 packet_type = infer_packet_type(direction, pid_conn->conn.d_port);
+            ret = postgres_send_large_buffer(req, u_buf, bytes_len, packet_type, direction, action);
+        }
+        break;
+    case k_protocol_type_http:
         break;
     case k_protocol_type_unknown:
         break;
+    }
+
+    return ret;
+}
+
+static __always_inline void
+failed_to_connect_event(pid_connection_info_t *pid_conn, u16 orig_dport, u64 connect_ts) {
+    tcp_req_t *req = bpf_ringbuf_reserve(&events, sizeof(tcp_req_t), 0);
+    if (req) {
+        req->flags = EVENT_FAILED_CONNECT;
+        req->conn_info = pid_conn->conn;
+        fixup_connection_info(&req->conn_info, TCP_SEND, orig_dport);
+        req->ssl = 0;
+        req->direction = TCP_SEND;
+        req->start_monotime_ns = connect_ts;
+        req->end_monotime_ns = bpf_ktime_get_ns();
+        req->resp_len = 0;
+        req->len = 0;
+        req->req_len = req->len;
+        req->extra_id = extra_runtime_id();
+        req->protocol_type = 0;
+        task_pid(&req->pid);
+        req->buf[0] = '\0';
+
+        req->tp.ts = bpf_ktime_get_ns();
+
+        bpf_dbg_printk("TCP connect failed event");
+
+        tcp_get_or_set_trace_info(req, pid_conn, 0, orig_dport);
+        bpf_ringbuf_submit(req, get_flags());
     }
 }
 
@@ -183,12 +243,22 @@ static __always_inline void handle_unknown_tcp_connection(pid_connection_info_t 
 
             tcp_get_or_set_trace_info(req, pid_conn, ssl, orig_dport);
 
-            tcp_send_large_buffer(req, pid_conn, u_buf, bytes_len, direction, protocol_type);
+            tcp_send_large_buffer(
+                req, pid_conn, u_buf, bytes_len, direction, protocol_type, k_large_buf_action_init);
 
             bpf_map_update_elem(&ongoing_tcp_req, pid_conn, req, BPF_ANY);
         }
     } else if (existing->direction != direction) {
-        tcp_send_large_buffer(existing, pid_conn, u_buf, bytes_len, direction, protocol_type);
+        if (tcp_send_large_buffer(existing,
+                                  pid_conn,
+                                  u_buf,
+                                  bytes_len,
+                                  direction,
+                                  protocol_type,
+                                  k_large_buf_action_init) < 0) {
+            bpf_dbg_printk("handle_unknown_tcp_connection: waiting additional response data");
+            return;
+        }
 
         if (existing->end_monotime_ns == 0) {
             bpf_clamp_umax(bytes_len, K_TCP_RES_LEN);
@@ -220,7 +290,14 @@ static __always_inline void handle_unknown_tcp_connection(pid_connection_info_t 
         existing->len += bytes_len;
         existing->req_len = existing->len;
         existing->protocol_type = protocol_type;
-        tcp_send_large_buffer(existing, pid_conn, u_buf, bytes_len, direction, protocol_type);
+
+        tcp_send_large_buffer(existing,
+                              pid_conn,
+                              u_buf,
+                              bytes_len,
+                              direction,
+                              protocol_type,
+                              k_large_buf_action_append);
     } else {
         existing->req_len += bytes_len;
     }
@@ -228,7 +305,16 @@ static __always_inline void handle_unknown_tcp_connection(pid_connection_info_t 
 
 // k_tail_protocol_tcp
 SEC("kprobe/tcp")
-int beyla_protocol_tcp(void *ctx) {
+int obi_protocol_tcp(void *ctx) {
+    (void)ctx;
+
+    // it assumes that the actual protocol_args have been previously set
+    // from another BPF function.
+    // If that's not the case, the connection details might be empty.
+    // If the same thread manages multiple connections at the same thread,
+    // in principle we should be anyway safe as this is part of a
+    // tail-call chain, so the current thread is currently inside the kernel
+    // (or blocked waiting for the kernel to complete) before it can service another connection.
     call_protocol_args_t *args = protocol_args();
 
     if (!args) {

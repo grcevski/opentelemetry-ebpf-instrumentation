@@ -2,34 +2,48 @@ name: Pull request integration tests ARM
 
 on:
   push:
-    branches: [ 'main', 'release-*' ]
+    branches: ["main", "release-*"]
+    paths:
+      - ".github/workflows/pull_request_integration_tests_arm.yml"
+      - "bpf/**"
+      - "cmd/**"
+      - "configs/**"
+      - "internal/**"
+      - "pkg/**"
+      - "scripts/**"
   pull_request:
-    branches: [ 'main', 'release-*' ]
+    branches: ["main", "release-*"]
+    paths:
+      - ".github/workflows/pull_request_integration_tests_arm.yml"
+      - "bpf/**"
+      - "cmd/**"
+      - "configs/**"
+      - "internal/**"
+      - "pkg/**"
+      - "scripts/**"
 
 permissions:
   contents: read
-  # Required for codecov
-  checks: write
-  pull-requests: write
-  # Required for uploading artifacts
-  actions: write
 
 jobs:
   test:
+    permissions:
+      # Required for codecov
+      checks: write
+      pull-requests: write
+      # Required for uploading artifacts
+      actions: write
     name: test
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        go: [ '1.24' ]
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
       - name: Set up Go
-        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
         with:
-          cache: 'false'
-          go-version: ${{ matrix.go }}
+          cache: "false"
+          go-version-file: "go.mod"
       - name: Clean up disk space
         run: |
           docker system prune -af
@@ -46,9 +60,9 @@ jobs:
             testoutput/*.log
             testoutput/kind
       - name: Report coverage
-        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4.6.0
+        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # v5.5.1
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         with:
-          file: ./testoutput/itest-covdata.txt
+          files: ./testoutput/itest-covdata.txt
           flags: integration-test-arm

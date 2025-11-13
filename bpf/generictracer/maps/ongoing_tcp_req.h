@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 
 #include <bpfcore/vmlinux.h>
@@ -12,5 +15,5 @@ struct {
     __type(key, pid_connection_info_t);
     __type(value, tcp_req_t);
     __uint(max_entries, MAX_CONCURRENT_SHARED_REQUESTS);
-    __uint(pinning, BEYLA_PIN_INTERNAL);
+    __uint(pinning, OBI_PIN_INTERNAL);
 } ongoing_tcp_req SEC(".maps");

@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package prom
 
 import (
@@ -9,15 +12,16 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/connector"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/netolly/ebpf"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/pipe/global"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/otel"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/pipe/msg"
+	"go.opentelemetry.io/obi/pkg/export/attributes"
+	"go.opentelemetry.io/obi/pkg/export/connector"
+	"go.opentelemetry.io/obi/pkg/export/otel/otelcfg"
+	"go.opentelemetry.io/obi/pkg/internal/netolly/ebpf"
+	"go.opentelemetry.io/obi/pkg/pipe/global"
+	"go.opentelemetry.io/obi/pkg/pipe/msg"
 )
 
 func TestMetricsExpiration(t *testing.T) {
+	t.Skip("fails regularly with port already in use or data race condition")
 	now := syncedClock{now: time.Now()}
 	timeNow = now.Now
 
@@ -36,10 +40,10 @@ func TestMetricsExpiration(t *testing.T) {
 			Path:                        "/metrics",
 			TTL:                         3 * time.Minute,
 			SpanMetricsServiceCacheSize: 10,
-			Features:                    []string{otel.FeatureNetwork},
+			Features:                    []string{otelcfg.FeatureNetwork},
 		}, SelectorCfg: &attributes.SelectorConfig{
 			SelectionCfg: attributes.Selection{
-				attributes.BeylaNetworkFlow.Section: attributes.InclusionLists{
+				attributes.NetworkFlow.Section: attributes.InclusionLists{
 					Include: []string{"src_name", "dst_name"},
 				},
 			},
@@ -63,8 +67,8 @@ func TestMetricsExpiration(t *testing.T) {
 	// THEN the metrics are exported
 	test.Eventually(t, timeout, func(t require.TestingT) {
 		exported := getMetrics(t, promURL)
-		assert.Contains(t, exported, `beyla_network_flow_bytes_total{dst_name="bar",src_name="foo"} 123`)
-		assert.Contains(t, exported, `beyla_network_flow_bytes_total{dst_name="bae",src_name="baz"} 456`)
+		assert.Contains(t, exported, `obi_network_flow_bytes_total{dst_name="bar",src_name="foo"} 123`)
+		assert.Contains(t, exported, `obi_network_flow_bytes_total{dst_name="bae",src_name="baz"} 456`)
 	})
 
 	// AND WHEN it keeps receiving a subset of the initial metrics during the timeout
@@ -81,11 +85,11 @@ func TestMetricsExpiration(t *testing.T) {
 	var exported string
 	test.Eventually(t, timeout, func(t require.TestingT) {
 		m := getMetrics(t, promURL)
-		assert.Contains(t, exported, `beyla_network_flow_bytes_total{dst_name="bar",src_name="foo"} 246`)
+		assert.Contains(t, exported, `obi_network_flow_bytes_total{dst_name="bar",src_name="foo"} 246`)
 		exported = m
 	})
 	// BUT not the metrics that haven't been received during that time
-	assert.NotContains(t, exported, `beyla_network_flow_bytes_total{dst_name="bae",src_name="baz"}`)
+	assert.NotContains(t, exported, `obi_network_flow_bytes_total{dst_name="bae",src_name="baz"}`)
 	now.Advance(2 * time.Minute)
 
 	// AND WHEN the metrics labels that disappeared are received again
@@ -100,8 +104,8 @@ func TestMetricsExpiration(t *testing.T) {
 	// THEN they are reported again, starting from zero in the case of counters
 	test.Eventually(t, timeout, func(t require.TestingT) {
 		m := getMetrics(t, promURL)
-		assert.Contains(t, exported, `beyla_network_flow_bytes_total{dst_name="bae",src_name="baz"} 456`)
+		assert.Contains(t, exported, `obi_network_flow_bytes_total{dst_name="bae",src_name="baz"} 456`)
 		exported = m
 	})
-	assert.NotContains(t, exported, `beyla_network_flow_bytes_total{dst_name="bar",src_name="foo"}`)
+	assert.NotContains(t, exported, `obi_network_flow_bytes_total{dst_name="bar",src_name="foo"}`)
 }

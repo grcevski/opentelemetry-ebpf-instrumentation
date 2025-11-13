@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package instrumenter
 
 import (
@@ -9,16 +12,17 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/appolly"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/connector"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/imetrics"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/kube"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/netolly/agent"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/netolly/flow"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/pipe/global"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/otel"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/obi"
+	"go.opentelemetry.io/obi/pkg/export/attributes"
+	"go.opentelemetry.io/obi/pkg/export/connector"
+	"go.opentelemetry.io/obi/pkg/export/imetrics"
+	"go.opentelemetry.io/obi/pkg/export/otel"
+	"go.opentelemetry.io/obi/pkg/export/otel/otelcfg"
+	"go.opentelemetry.io/obi/pkg/internal/appolly"
+	"go.opentelemetry.io/obi/pkg/kube"
+	"go.opentelemetry.io/obi/pkg/netolly/agent"
+	"go.opentelemetry.io/obi/pkg/netolly/flowdef"
+	"go.opentelemetry.io/obi/pkg/obi"
+	"go.opentelemetry.io/obi/pkg/pipe/global"
 )
 
 // Run in the foreground process. This is a blocking function and won't exit
@@ -27,6 +31,8 @@ func Run(
 	ctx context.Context, cfg *obi.Config,
 	opts ...Option,
 ) error {
+	normalizeConfig(cfg)
+
 	ctxInfo, err := buildCommonContextInfo(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("can't build common context info: %w", err)
@@ -64,6 +70,11 @@ func Run(
 	}
 	slog.Debug("OBI main node finished")
 	return nil
+}
+
+// normalizeConfig normalizes user input to a common set of assumptions that are global to OBI
+func normalizeConfig(cfg *obi.Config) {
+	cfg.Attributes.Select.Normalize()
 }
 
 func setupAppO11y(ctx context.Context, ctxInfo *global.ContextInfo, config *obi.Config) error {
@@ -157,49 +168,60 @@ func buildCommonContextInfo(
 
 	promMgr := &connector.PrometheusManager{}
 	ctxInfo := &global.ContextInfo{
-		Prometheus: promMgr,
-		K8sInformer: kube.NewMetadataProvider(kube.MetadataConfig{
-			Enable:              config.Attributes.Kubernetes.Enable,
-			KubeConfigPath:      config.Attributes.Kubernetes.KubeconfigPath,
-			SyncTimeout:         config.Attributes.Kubernetes.InformersSyncTimeout,
-			ResyncPeriod:        config.Attributes.Kubernetes.InformersResyncPeriod,
-			DisabledInformers:   config.Attributes.Kubernetes.DisableInformers,
-			MetaCacheAddr:       config.Attributes.Kubernetes.MetaCacheAddress,
-			ResourceLabels:      resourceLabels,
-			RestrictLocalNode:   config.Attributes.Kubernetes.MetaRestrictLocalNode,
-			ServiceNameTemplate: templ,
-		}),
+		Prometheus:          promMgr,
+		OTELMetricsExporter: &otelcfg.MetricsExporterInstancer{Cfg: &config.Metrics},
 	}
 	if config.Attributes.HostID.Override == "" {
 		ctxInfo.FetchHostID(ctx, config.Attributes.HostID.FetchTimeout)
 	} else {
 		ctxInfo.HostID = config.Attributes.HostID.Override
 	}
-	switch {
-	case config.InternalMetrics.Exporter == imetrics.InternalMetricsExporterOTEL:
-		var err error
-		slog.Debug("reporting internal metrics as OpenTelemetry")
-		ctxInfo.Metrics, err = otel.NewInternalMetricsReporter(ctx, ctxInfo, &config.Metrics)
-		if err != nil {
-			return nil, fmt.Errorf("can't start OpenTelemetry metrics: %w", err)
-		}
-	case config.InternalMetrics.Exporter == imetrics.InternalMetricsExporterPrometheus || config.InternalMetrics.Prometheus.Port != 0:
-		slog.Debug("reporting internal metrics as Prometheus")
-		ctxInfo.Metrics = imetrics.NewPrometheusReporter(&config.InternalMetrics.Prometheus, promMgr, nil)
-		// Prometheus manager also has its own internal metrics, so we need to pass the imetrics reporter
-		// TODO: remove this dependency cycle and let prommgr to create and return the PrometheusReporter
-		promMgr.InstrumentWith(ctxInfo.Metrics)
-	case config.Prometheus.Registry != nil:
-		slog.Debug("reporting internal metrics with Prometheus Registry")
-		ctxInfo.Metrics = imetrics.NewPrometheusReporter(&config.InternalMetrics.Prometheus, nil, config.Prometheus.Registry)
-	default:
-		slog.Debug("not reporting internal metrics")
-		ctxInfo.Metrics = imetrics.NoopReporter{}
+	ctxInfo.Metrics, err = internalMetrics(ctx, config, ctxInfo, promMgr)
+	if err != nil {
+		return nil, fmt.Errorf("can't create internal metrics: %w", err)
 	}
+
+	ctxInfo.K8sInformer = kube.NewMetadataProvider(kube.MetadataConfig{
+		Enable:              config.Attributes.Kubernetes.Enable,
+		KubeConfigPath:      config.Attributes.Kubernetes.KubeconfigPath,
+		SyncTimeout:         config.Attributes.Kubernetes.InformersSyncTimeout,
+		ResyncPeriod:        config.Attributes.Kubernetes.InformersResyncPeriod,
+		DisabledInformers:   config.Attributes.Kubernetes.DisableInformers,
+		MetaCacheAddr:       config.Attributes.Kubernetes.MetaCacheAddress,
+		ResourceLabels:      resourceLabels,
+		RestrictLocalNode:   config.Attributes.Kubernetes.MetaRestrictLocalNode,
+		ServiceNameTemplate: templ,
+	}, ctxInfo.Metrics)
 
 	attributeGroups(config, ctxInfo)
 
 	return ctxInfo, nil
+}
+
+func internalMetrics(
+	ctx context.Context,
+	config *obi.Config,
+	ctxInfo *global.ContextInfo,
+	promMgr *connector.PrometheusManager,
+) (imetrics.Reporter, error) {
+	switch {
+	case config.InternalMetrics.Exporter == imetrics.InternalMetricsExporterOTEL:
+		slog.Debug("reporting internal metrics as OpenTelemetry")
+		return otel.NewInternalMetricsReporter(ctx, ctxInfo, &config.Metrics, &config.InternalMetrics)
+	case config.InternalMetrics.Exporter == imetrics.InternalMetricsExporterPrometheus || config.InternalMetrics.Prometheus.Port != 0:
+		slog.Debug("reporting internal metrics as Prometheus")
+		metrics := imetrics.NewPrometheusReporter(&config.InternalMetrics, promMgr, nil)
+		// Prometheus manager also has its own internal metrics, so we need to pass the imetrics reporter
+		// TODO: remove this dependency cycle and let prommgr to create and return the PrometheusReporter
+		promMgr.InstrumentWith(metrics)
+		return metrics, nil
+	case config.Prometheus.Registry != nil:
+		slog.Debug("reporting internal metrics with Prometheus Registry")
+		return imetrics.NewPrometheusReporter(&config.InternalMetrics, nil, config.Prometheus.Registry), nil
+	default:
+		slog.Debug("not reporting internal metrics")
+		return imetrics.NoopReporter{}, nil
+	}
 }
 
 // attributeGroups specifies, based in the provided configuration, which groups of attributes
@@ -211,7 +233,7 @@ func attributeGroups(config *obi.Config, ctxInfo *global.ContextInfo) {
 	if config.Routes != nil {
 		ctxInfo.MetricAttributeGroups.Add(attributes.GroupHTTPRoutes)
 	}
-	if config.NetworkFlows.Deduper == flow.DeduperNone {
+	if config.NetworkFlows.Deduper == flowdef.DeduperNone {
 		ctxInfo.MetricAttributeGroups.Add(attributes.GroupNetIfaceDirection)
 	}
 	if config.NetworkFlows.CIDRs.Enabled() {

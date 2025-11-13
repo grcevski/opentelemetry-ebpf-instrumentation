@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 
 #include <bpfcore/vmlinux.h>
@@ -5,6 +8,7 @@
 
 #include <common/connection_info.h>
 #include <common/egress_key.h>
+#include <common/http_buf_size.h>
 #include <common/map_sizing.h>
 #include <common/msg_buffer.h>
 #include <common/pin_internal.h>
@@ -23,7 +27,7 @@ struct {
     __type(key, connection_info_t);
     __type(value, sk_msg_buffer_t);
     __uint(max_entries, MAX_CONCURRENT_REQUESTS);
-    __uint(pinning, BEYLA_PIN_INTERNAL);
+    __uint(pinning, OBI_PIN_INTERNAL);
 } sk_buffers SEC(".maps");
 
 struct {

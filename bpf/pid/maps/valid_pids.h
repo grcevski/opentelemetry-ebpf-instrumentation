@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 
 #include <bpfcore/vmlinux.h>
@@ -12,5 +15,5 @@ struct {
     __uint(max_entries, k_max_concurrent_pids);
     __type(key, u32);
     __type(value, u64); // using 8 bytes, because array elements are 8 bytes aligned anyway
-    __uint(pinning, BEYLA_PIN_INTERNAL);
+    __uint(pinning, OBI_PIN_INTERNAL);
 } valid_pids SEC(".maps");

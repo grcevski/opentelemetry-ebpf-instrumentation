@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 
 #include <bpfcore/utils.h>
@@ -29,6 +32,8 @@ enum { k_bpf_traceparent_enabled = 1 };
 enum { k_bpf_traceparent_enabled = 0 };
 #endif
 
+volatile const u64 max_transaction_time;
+
 static __always_inline unsigned char *tp_char_buf() {
     int zero = 0;
     return bpf_map_lookup_elem(&tp_char_buf_mem, &zero);
@@ -52,11 +57,15 @@ static __always_inline void trace_key_from_pid_tid(trace_key_t *t_key) {
     t_key->extra_id = extra_id;
 }
 
-static int tp_match(u32 index, void *data) {
-    if (!k_bpf_traceparent_enabled) {
-        return 0;
-    }
+static __always_inline void
+trace_key_from_pid_tid_with_p_key(trace_key_t *t_key, const pid_key_t *p_key, u64 id) {
+    t_key->p_key = *p_key;
 
+    u64 extra_id = extra_runtime_id_with_task_id(id);
+    t_key->extra_id = extra_id;
+}
+
+static int tp_match(u32 index, void *data) {
     if (index >= (TRACE_BUF_SIZE - TRACE_PARENT_HEADER_LEN)) {
         return 1;
     }
@@ -72,7 +81,7 @@ static int tp_match(u32 index, void *data) {
     return 0;
 }
 
-static __always_inline unsigned char *bpf_strstr_tp_loop(unsigned char *buf, int buf_len) {
+static __always_inline unsigned char *bpf_strstr_tp_loop(unsigned char *buf, const u16 buf_len) {
     if (!k_bpf_traceparent_enabled) {
         return NULL;
     }
@@ -84,14 +93,34 @@ static __always_inline unsigned char *bpf_strstr_tp_loop(unsigned char *buf, int
     bpf_loop(nr_loops, tp_match, &data, 0);
 
     if (data.pos) {
-        return (data.pos > (TRACE_BUF_SIZE - TRACE_PARENT_HEADER_LEN)) ? NULL : &(buf[data.pos]);
+        return (data.pos > (TRACE_BUF_SIZE - TRACE_PARENT_HEADER_LEN)) ? NULL : &buf[data.pos];
     }
 
     return NULL;
 }
 
-static __always_inline const tp_info_pid_t *
-find_nginx_parent_trace(const pid_connection_info_t *p_conn, u16 orig_dport) {
+static __always_inline unsigned char *bpf_strstr_tp_loop__legacy(unsigned char *buf,
+                                                                 const u16 buf_len) {
+    (void)buf_len;
+
+    if (!k_bpf_traceparent_enabled) {
+        return NULL;
+    }
+
+    // Limited best-effort search to stay within insns limit
+    const u16 k_besteffort_max_loops = 350;
+
+    for (u16 i = 0; i < k_besteffort_max_loops; i++) {
+        if (is_traceparent(&buf[i])) {
+            return &buf[i];
+        }
+    }
+
+    return NULL;
+}
+
+static __always_inline tp_info_pid_t *find_nginx_parent_trace(const pid_connection_info_t *p_conn,
+                                                              u16 orig_dport) {
     connection_info_part_t client_part = {};
     populate_ephemeral_info(&client_part, &p_conn->conn, orig_dport, p_conn->pid, FD_CLIENT);
     fd_info_t *fd_info = fd_info_for_conn(&client_part);
@@ -108,8 +137,8 @@ find_nginx_parent_trace(const pid_connection_info_t *p_conn, u16 orig_dport) {
     return NULL;
 }
 
-static __always_inline const tp_info_pid_t *
-find_nodejs_parent_trace(const pid_connection_info_t *p_conn, u16 orig_dport) {
+static __always_inline tp_info_pid_t *
+find_nodejs_parent_trace(const pid_connection_info_t *p_conn, u16 orig_dport, u64 pid_tgid) {
     connection_info_part_t client_part = {};
     populate_ephemeral_info(&client_part, &p_conn->conn, orig_dport, p_conn->pid, FD_CLIENT);
     fd_info_t *fd_info = fd_info_for_conn(&client_part);
@@ -118,7 +147,6 @@ find_nodejs_parent_trace(const pid_connection_info_t *p_conn, u16 orig_dport) {
         return NULL;
     }
 
-    const u64 pid_tgid = bpf_get_current_pid_tgid();
     const u64 client_key = (pid_tgid << 32) | fd_info->fd;
 
     const s32 *node_parent_request_fd = bpf_map_lookup_elem(&nodejs_fd_map, &client_key);
@@ -142,12 +170,12 @@ find_nodejs_parent_trace(const pid_connection_info_t *p_conn, u16 orig_dport) {
     return trace_info_for_connection(conn, TRACE_TYPE_SERVER);
 }
 
-static __always_inline const tp_info_pid_t *find_parent_process_trace(trace_key_t *t_key) {
+static __always_inline tp_info_pid_t *find_parent_process_trace(trace_key_t *t_key) {
     // Up to 5 levels of thread nesting allowed
     enum { k_max_depth = 5 };
 
     for (u8 i = 0; i < k_max_depth; ++i) {
-        const tp_info_pid_t *server_tp = bpf_map_lookup_elem(&server_traces, t_key);
+        tp_info_pid_t *server_tp = bpf_map_lookup_elem(&server_traces, t_key);
 
         if (server_tp) {
             bpf_dbg_printk("Found parent trace for pid=%d, ns=%lx, extra_id=%llx",
@@ -172,30 +200,28 @@ static __always_inline const tp_info_pid_t *find_parent_process_trace(trace_key_
     return NULL;
 }
 
-static __always_inline const tp_info_pid_t *find_parent_trace(const pid_connection_info_t *p_conn,
-                                                              u16 orig_dport) {
-    const tp_info_pid_t *node_tp = find_nodejs_parent_trace(p_conn, orig_dport);
+static __always_inline tp_info_pid_t *find_parent_trace(const pid_connection_info_t *p_conn,
+                                                        u64 pid_tgid,
+                                                        trace_key_t *t_key,
+                                                        u16 orig_dport) {
+    tp_info_pid_t *node_tp = find_nodejs_parent_trace(p_conn, orig_dport, pid_tgid);
 
     if (node_tp) {
         return node_tp;
     }
 
-    trace_key_t t_key = {0};
-
-    trace_key_from_pid_tid(&t_key);
-
     bpf_dbg_printk("Looking up parent trace for pid=%d, ns=%lx, extra_id=%llx",
-                   t_key.p_key.pid,
-                   t_key.p_key.ns,
-                   t_key.extra_id);
+                   t_key->p_key.pid,
+                   t_key->p_key.ns,
+                   t_key->extra_id);
 
-    const tp_info_pid_t *nginx_parent = find_nginx_parent_trace(p_conn, orig_dport);
+    tp_info_pid_t *nginx_parent = find_nginx_parent_trace(p_conn, orig_dport);
 
     if (nginx_parent) {
         return nginx_parent;
     }
 
-    const tp_info_pid_t *proc_parent = find_parent_process_trace(&t_key);
+    tp_info_pid_t *proc_parent = find_parent_process_trace(t_key);
 
     if (proc_parent) {
         return proc_parent;
@@ -230,7 +256,7 @@ static __always_inline void delete_server_trace(pid_connection_info_t *pid_conn,
                                                 trace_key_t *t_key) {
     delete_trace_info_for_connection(&pid_conn->conn, TRACE_TYPE_SERVER);
     int __attribute__((unused)) res = bpf_map_delete_elem(&server_traces, t_key);
-    bpf_dbg_printk("Deleting server span for id=%llx, pid=%d, ns=%d",
+    bpf_dbg_printk("Deleting server span for id=%llx, pid=%d, ns=%x",
                    bpf_get_current_pid_tgid(),
                    t_key->p_key.pid,
                    t_key->p_key.ns);
@@ -363,17 +389,51 @@ static __always_inline u8 find_trace_for_server_request(connection_info_t *conn,
     return found_tp;
 }
 
-static __always_inline u8 find_trace_for_client_request(const pid_connection_info_t *p_conn,
-                                                        u16 orig_dport,
-                                                        tp_info_t *tp) {
-    const tp_info_pid_t *server_tp = find_parent_trace(p_conn, orig_dport);
+static __always_inline u8 should_be_in_same_transaction(const tp_info_t *parent_tp,
+                                                        const tp_info_t *child_tp) {
+    if (child_tp->ts < parent_tp->ts) {
+        return 0;
+    }
+
+    u64 diff = child_tp->ts - parent_tp->ts;
+
+    return diff < max_transaction_time;
+}
+
+static __always_inline u8
+find_trace_for_client_request_with_t_key(const pid_connection_info_t *p_conn,
+                                         u16 orig_dport,
+                                         trace_key_t *t_key,
+                                         u64 pid_tgid,
+                                         tp_info_t *tp) {
+    tp_info_pid_t *server_tp = find_parent_trace(p_conn, pid_tgid, t_key, orig_dport);
 
     if (server_tp && server_tp->valid && valid_trace(server_tp->tp.trace_id)) {
         bpf_dbg_printk("Found existing server tp for client call");
+
+        if (!should_be_in_same_transaction(&server_tp->tp, tp)) {
+            bpf_dbg_printk("Parent and child are too far apart, marking server trace as invalid");
+            bpf_dbg_printk(
+                "%lld >>> %lld (max: %lld)", tp->ts, server_tp->tp.ts, max_transaction_time);
+            server_tp->valid = 0;
+            return 0;
+        }
+
         __builtin_memcpy(tp->trace_id, server_tp->tp.trace_id, sizeof(tp->trace_id));
         __builtin_memcpy(tp->parent_id, server_tp->tp.span_id, sizeof(tp->parent_id));
         return 1;
     }
 
     return 0;
+}
+
+static __always_inline u8 find_trace_for_client_request(const pid_connection_info_t *p_conn,
+                                                        u16 orig_dport,
+                                                        tp_info_t *tp) {
+
+    trace_key_t t_key = {0};
+    trace_key_from_pid_tid(&t_key);
+    const u64 pid_tgid = bpf_get_current_pid_tgid();
+
+    return find_trace_for_client_request_with_t_key(p_conn, orig_dport, &t_key, pid_tgid, tp);
 }

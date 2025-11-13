@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package attributes
 
 import (
@@ -6,8 +9,8 @@ import (
 	"maps"
 	"slices"
 
-	maps2 "github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/helpers/maps"
-	attr "github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes/names"
+	attr "go.opentelemetry.io/obi/pkg/export/attributes/names"
+	maps2 "go.opentelemetry.io/obi/pkg/internal/helpers/maps"
 )
 
 func alog() *slog.Logger {
@@ -92,7 +95,9 @@ type AttrSelector struct {
 }
 
 // NewAttrSelector returns an AttrSelector instance based on the user-provided attributes Selection
-// and the auto-detected attribute AttrGroups
+// and the auto-detected attribute AttrGroups.
+// NewAttrSelector assumes that the passed SelectorConfig is already normalized (has already invoked
+// its method Normalize on its Selection internal field)
 func NewAttrSelector(
 	groups AttrGroups,
 	cfg *SelectorConfig,
@@ -100,20 +105,18 @@ func NewAttrSelector(
 	return NewCustomAttrSelector(groups, cfg, getDefinitions)
 }
 
+// NewCustomAttrSelector is required for extensions of OBI with other metric types
 func NewCustomAttrSelector(
 	groups AttrGroups,
 	cfg *SelectorConfig,
 	extraDefinitionsProvider func(groups AttrGroups, extraGroupAttributes GroupAttributes) map[Section]AttrReportGroup,
 ) (*AttrSelector, error) {
-	cfg.SelectionCfg.Normalize()
 	extraGroupAttributes := NewGroupAttributes(cfg.ExtraGroupAttributesCfg)
 
 	definitions := getDefinitions(groups, extraGroupAttributes)
 
 	if extraDefinitionsProvider != nil {
-		for section, group := range extraDefinitionsProvider(groups, extraGroupAttributes) {
-			definitions[section] = group
-		}
+		maps.Copy(definitions, extraDefinitionsProvider(groups, extraGroupAttributes))
 	}
 
 	// TODO: validate

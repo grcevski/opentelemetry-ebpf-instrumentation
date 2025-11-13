@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package obi
 
 import (
@@ -14,21 +17,19 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/ebpf/tcmanager"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/imetrics"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/kube"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/netolly/transform/cidr"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/traces"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/config"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes"
-	attr "github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes/names"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/debug"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/instrumentations"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/otel"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/prom"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/kubeflags"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/services"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/transform"
+	"go.opentelemetry.io/obi/pkg/appolly/services"
+	"go.opentelemetry.io/obi/pkg/config"
+	"go.opentelemetry.io/obi/pkg/export/attributes"
+	attr "go.opentelemetry.io/obi/pkg/export/attributes/names"
+	"go.opentelemetry.io/obi/pkg/export/debug"
+	"go.opentelemetry.io/obi/pkg/export/imetrics"
+	"go.opentelemetry.io/obi/pkg/export/instrumentations"
+	"go.opentelemetry.io/obi/pkg/export/otel/otelcfg"
+	"go.opentelemetry.io/obi/pkg/export/prom"
+	"go.opentelemetry.io/obi/pkg/kube"
+	"go.opentelemetry.io/obi/pkg/kube/kubeflags"
+	"go.opentelemetry.io/obi/pkg/netolly/cidr"
+	"go.opentelemetry.io/obi/pkg/transform"
 )
 
 type envMap map[string]string
@@ -53,6 +54,9 @@ prometheus_export:
     request_size_histogram: [0, 10, 20, 22]
     response_size_histogram: [0, 10, 20, 22]
 attributes:
+  rename_unresolved_hosts: ""
+  rename_unresolved_hosts_outgoing: ""
+  rename_unresolved_hosts_incoming: ""
   kubernetes:
     kubeconfig_path: /foo/bar
     enable: true
@@ -65,7 +69,7 @@ attributes:
     override: the-host-id
     fetch_timeout: 4s
   select:
-    beyla.network.flow:
+    obi.network.flow:
       include: ["foo", "bar"]
       exclude: ["baz", "bae"]
   extra_group_attributes:
@@ -74,6 +78,8 @@ network:
   enable: true
   cidrs:
     - 10.244.0.0/16
+discovery:
+  min_process_age: 5s
 `)
 	t.Setenv("OTEL_EBPF_EXECUTABLE_PATH", "tras")
 	t.Setenv("OTEL_EBPF_NETWORK_AGENT_IP", "1.2.3.4")
@@ -98,7 +104,7 @@ network:
 	assert.False(t, cfg.Port.Matches(8078))
 	assert.False(t, cfg.Port.Matches(8098))
 
-	nc := defaultNetworkConfig
+	nc := DefaultNetworkConfig
 	nc.Enable = true
 	nc.AgentIP = "1.2.3.4"
 	nc.CIDRs = cidr.Definitions{"10.244.0.0/16"}
@@ -119,7 +125,9 @@ network:
 			BatchLength:               100,
 			BatchTimeout:              time.Second,
 			HTTPRequestTimeout:        0,
-			TCBackend:                 tcmanager.TCBackendAuto,
+			MaxTransactionTime:        5 * time.Minute,
+			TCBackend:                 config.TCBackendAuto,
+			DNSRequestTimeout:         5 * time.Second,
 			ContextPropagationEnabled: false,
 			ContextPropagation:        config.ContextPropagationDisabled,
 			RedisDBCache: config.RedisDBCacheConfig{
@@ -127,20 +135,25 @@ network:
 				MaxSize: 1000,
 			},
 			BufferSizes: config.EBPFBufferSizes{
-				MySQL: 0,
+				MySQL:    0,
+				Postgres: 0,
 			},
+			MySQLPreparedStatementsCacheSize:    1024,
+			PostgresPreparedStatementsCacheSize: 1024,
+			MongoRequestsCacheSize:              1024,
+			KafkaTopicUUIDCacheSize:             1024,
 		},
 		NetworkFlows: nc,
-		Metrics: otel.MetricsConfig{
+		Metrics: otelcfg.MetricsConfig{
 			OTELIntervalMS:    60_000,
 			CommonEndpoint:    "localhost:3131",
 			MetricsEndpoint:   "localhost:3030",
-			Protocol:          otel.ProtocolUnset,
+			Protocol:          otelcfg.ProtocolUnset,
 			ReportersCacheLen: ReporterLRUSize,
-			Buckets: otel.Buckets{
+			Buckets: otelcfg.Buckets{
 				DurationHistogram:     []float64{0, 1, 2},
-				RequestSizeHistogram:  otel.DefaultBuckets.RequestSizeHistogram,
-				ResponseSizeHistogram: otel.DefaultBuckets.ResponseSizeHistogram,
+				RequestSizeHistogram:  otelcfg.DefaultBuckets.RequestSizeHistogram,
+				ResponseSizeHistogram: otelcfg.DefaultBuckets.ResponseSizeHistogram,
 			},
 			Features: []string{"application"},
 			Instrumentations: []string{
@@ -149,27 +162,33 @@ network:
 			HistogramAggregation: "base2_exponential_bucket_histogram",
 			TTL:                  5 * time.Minute,
 		},
-		Traces: otel.TracesConfig{
-			Protocol:           otel.ProtocolUnset,
-			CommonEndpoint:     "localhost:3131",
-			TracesEndpoint:     "localhost:3232",
-			MaxQueueSize:       4096,
-			MaxExportBatchSize: 4096,
-			ReportersCacheLen:  ReporterLRUSize,
+		Traces: otelcfg.TracesConfig{
+			Protocol:          otelcfg.ProtocolUnset,
+			CommonEndpoint:    "localhost:3131",
+			TracesEndpoint:    "localhost:3232",
+			MaxQueueSize:      4096,
+			BatchTimeout:      15 * time.Second,
+			ReportersCacheLen: ReporterLRUSize,
 			Instrumentations: []string{
-				instrumentations.InstrumentationALL,
+				instrumentations.InstrumentationHTTP,
+				instrumentations.InstrumentationGRPC,
+				instrumentations.InstrumentationSQL,
+				instrumentations.InstrumentationRedis,
+				instrumentations.InstrumentationKafka,
+				instrumentations.InstrumentationMongo,
+				// no traces for DNS and GPU by default
 			},
 		},
 		Prometheus: prom.PrometheusConfig{
 			Path:     "/metrics",
-			Features: []string{otel.FeatureApplication},
+			Features: []string{otelcfg.FeatureApplication},
 			Instrumentations: []string{
 				instrumentations.InstrumentationALL,
 			},
 			TTL:                         time.Second,
 			SpanMetricsServiceCacheSize: 10000,
-			Buckets: otel.Buckets{
-				DurationHistogram:     otel.DefaultBuckets.DurationHistogram,
+			Buckets: otelcfg.Buckets{
+				DurationHistogram:     otelcfg.DefaultBuckets.DurationHistogram,
 				RequestSizeHistogram:  []float64{0, 10, 20, 22},
 				ResponseSizeHistogram: []float64{0, 10, 20, 22},
 			},
@@ -180,9 +199,10 @@ network:
 				Port: 3210,
 				Path: "/internal/metrics",
 			},
+			BpfMetricScrapeInterval: 15 * time.Second,
 		},
 		Attributes: Attributes{
-			InstanceID: traces.InstanceIDConfig{
+			InstanceID: config.InstanceIDConfig{
 				HostnameDNSResolution: true,
 			},
 			Kubernetes: transform.KubernetesDecorator{
@@ -197,7 +217,7 @@ network:
 				FetchTimeout: 4 * time.Second,
 			},
 			Select: attributes.Selection{
-				attributes.BeylaNetworkFlow.Section: attributes.InclusionLists{
+				attributes.NetworkFlow.Section: attributes.InclusionLists{
 					Include: []string{"foo", "bar"},
 					Exclude: []string{"baz", "bae"},
 				},
@@ -205,6 +225,7 @@ network:
 			ExtraGroupAttributes: map[string][]attr.Name{
 				"k8s_app_meta": {"k8s.app.version"},
 			},
+			MetricSpanNameAggregationLimit: 100,
 		},
 		Routes: &transform.RoutesConfig{
 			Unmatch:      transform.UnmatchHeuristic,
@@ -217,6 +238,7 @@ network:
 		},
 		Discovery: services.DiscoveryConfig{
 			ExcludeOTelInstrumentedServices: true,
+			MinProcessAge:                   5 * time.Second,
 			DefaultExcludeServices: services.RegexDefinitionCriteria{
 				services.RegexSelector{
 					Path: services.NewRegexp("(?:^|/)(beyla$|alloy$|otelcol[^/]*$)"),
@@ -233,6 +255,14 @@ network:
 					Metadata: map[string]*services.GlobAttr{"k8s_namespace": &k8sDefaultNamespacesGlob},
 				},
 			},
+			DefaultOtlpGRPCPort:   4317,
+			RouteHarvesterTimeout: 10 * time.Second,
+			RouteHarvestConfig: services.RouteHarvestingConfig{
+				JavaHarvestDelay: 60 * time.Second,
+			},
+		},
+		NodeJS: NodeJSConfig{
+			Enabled: true,
 		},
 	}, cfg)
 }
@@ -329,7 +359,7 @@ attributes:
   kubernetes:
     enable: true
   select:
-    beyla_network_flow_bytes:
+    obi_network_flow_bytes:
       include:
         - k8s.src.name
         - k8s.dst.name
@@ -568,6 +598,79 @@ func TestWillUseTC(t *testing.T) {
 	env = envMap{"OTEL_EBPF_BPF_CONTEXT_PROPAGATION": "disabled", "OTEL_EBPF_NETWORK_SOURCE": "tc", "OTEL_EBPF_NETWORK_METRICS": "true"}
 	cfg = loadConfig(t, env)
 	assert.True(t, cfg.willUseTC())
+}
+
+func TestConfig_SpanMetricsEnabledForTraces(t *testing.T) {
+	tests := []struct {
+		name        string
+		metrics     otelcfg.MetricsConfig
+		prometheus  prom.PrometheusConfig
+		wantEnabled bool
+	}{
+		{
+			name:        "none enabled",
+			metrics:     otelcfg.MetricsConfig{},
+			prometheus:  prom.PrometheusConfig{},
+			wantEnabled: false,
+		},
+		{
+			name: "otel metrics enabled, but not spans",
+			metrics: otelcfg.MetricsConfig{
+				MetricsEndpoint: "http://localhost:4318/v1/metrics",
+				Features:        []string{otelcfg.FeatureApplication},
+			},
+			prometheus:  prom.PrometheusConfig{},
+			wantEnabled: false,
+		},
+		{
+			name: "otel metrics enabled with spans",
+			metrics: otelcfg.MetricsConfig{
+				MetricsEndpoint: "http://localhost:4318/v1/metrics",
+				Features:        []string{otelcfg.FeatureSpanOTel},
+			},
+			prometheus:  prom.PrometheusConfig{},
+			wantEnabled: true,
+		},
+		{
+			name:    "prometheus metrics enabled, but not spans",
+			metrics: otelcfg.MetricsConfig{},
+			prometheus: prom.PrometheusConfig{
+				Port:     9090,
+				Features: []string{otelcfg.FeatureApplication},
+			},
+			wantEnabled: false,
+		},
+		{
+			name:    "prometheus span metrics enabled",
+			metrics: otelcfg.MetricsConfig{},
+			prometheus: prom.PrometheusConfig{
+				Port:     9090,
+				Features: []string{otelcfg.FeatureGraph},
+			},
+			wantEnabled: true,
+		},
+		{
+			name: "both have features, but not enabled",
+			metrics: otelcfg.MetricsConfig{
+				Features: []string{otelcfg.FeatureApplication},
+			},
+			prometheus: prom.PrometheusConfig{
+				Features: []string{otelcfg.FeatureGraph},
+			},
+			wantEnabled: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{
+				Metrics:    tc.metrics,
+				Prometheus: tc.prometheus,
+			}
+			got := cfg.SpanMetricsEnabledForTraces()
+			assert.Equal(t, tc.wantEnabled, got)
+		})
+	}
 }
 
 func loadConfig(t *testing.T, env envMap) *Config {

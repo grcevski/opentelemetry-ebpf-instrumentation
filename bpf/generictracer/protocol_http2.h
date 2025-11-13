@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 
 #include <bpfcore/vmlinux.h>
@@ -36,6 +39,11 @@ static __always_inline u8 http2_flag_new(u8 flags) {
     return flags & http2_conn_flag_new;
 }
 
+static __always_inline u8 already_tracked_http2(const pid_connection_info_t *p_conn) {
+    http2_conn_info_data_t *http2_info = bpf_map_lookup_elem(&ongoing_http2_connections, p_conn);
+    return http2_info != 0;
+}
+
 static __always_inline http2_grpc_request_t *empty_http2_info() {
     int zero = 0;
     http2_grpc_request_t *value = bpf_map_lookup_elem(&http2_info_mem, &zero);
@@ -65,7 +73,7 @@ static __always_inline void http2_grpc_start(
     //dbg_print_http_connection_info(&s_key->pid_conn.conn); // commented out since GitHub CI doesn't like this call
     if (h2g_info) {
         http_connection_metadata_t *meta =
-            connection_meta_by_direction(&s_key->pid_conn, direction, PACKET_TYPE_REQUEST);
+            connection_meta_by_direction(direction, PACKET_TYPE_REQUEST);
         if (!meta) {
             bpf_dbg_printk("Can't get meta memory or connection not found");
             return;
@@ -201,7 +209,7 @@ static __always_inline void handle_data_frame(void *ctx, grpc_frames_ctx_t *g_ct
 
 // k_tail_protocol_http2_grpc_handle_start_frame
 SEC("kprobe/http2")
-int beyla_protocol_http2_grpc_handle_start_frame(void *ctx) {
+int obi_protocol_http2_grpc_handle_start_frame(void *ctx) {
     (void)ctx;
 
     grpc_frames_ctx_t *g_ctx = grpc_ctx();
@@ -222,7 +230,7 @@ int beyla_protocol_http2_grpc_handle_start_frame(void *ctx) {
 
 // k_tail_protocol_http2_grpc_handle_end_frame
 SEC("kprobe/http2")
-int beyla_protocol_http2_grpc_handle_end_frame(void *ctx) {
+int obi_protocol_http2_grpc_handle_end_frame(void *ctx) {
     (void)ctx;
 
     grpc_frames_ctx_t *g_ctx = grpc_ctx();
@@ -261,7 +269,7 @@ int beyla_protocol_http2_grpc_handle_end_frame(void *ctx) {
 // information to evaluate whether the parsed data is potentially a GRPC
 // frame, and if so, we ship it to userspace for further processing.
 SEC("kprobe/http2")
-int beyla_protocol_http2_grpc_frames(void *ctx) {
+int obi_protocol_http2_grpc_frames(void *ctx) {
     const u8 k_max_loop_iterations = 4; // the maximum number of the for loop iterations
     const u8 k_loop_count = 3;          // the number of times we will retry the loop
     const u8 k_iterations = k_max_loop_iterations * k_loop_count;
@@ -332,7 +340,7 @@ int beyla_protocol_http2_grpc_frames(void *ctx) {
 
 // k_tail_protocol_http2
 SEC("kprobe/http2")
-int beyla_protocol_http2(void *ctx) {
+int obi_protocol_http2(void *ctx) {
     call_protocol_args_t *args = protocol_args();
 
     if (!args) {

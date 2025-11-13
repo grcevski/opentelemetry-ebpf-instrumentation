@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package prom
 
 import (
@@ -7,13 +10,13 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/connector"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/netolly/ebpf"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/pipe/global"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/expire"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/pipe/msg"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/pipe/swarm"
+	"go.opentelemetry.io/obi/pkg/export/attributes"
+	"go.opentelemetry.io/obi/pkg/export/connector"
+	"go.opentelemetry.io/obi/pkg/export/expire"
+	"go.opentelemetry.io/obi/pkg/internal/netolly/ebpf"
+	"go.opentelemetry.io/obi/pkg/pipe/global"
+	"go.opentelemetry.io/obi/pkg/pipe/msg"
+	"go.opentelemetry.io/obi/pkg/pipe/swarm"
 )
 
 // injectable function reference for testing
@@ -98,10 +101,10 @@ func newNetReporter(
 		log.Debug("registering network flow bytes metric")
 		mr.flowAttrs = attributes.PrometheusGetters(
 			ebpf.RecordStringGetters,
-			provider.For(attributes.BeylaNetworkFlow))
+			provider.For(attributes.NetworkFlow))
 
 		mr.flowBytes = NewExpirer[prometheus.Counter](prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: attributes.BeylaNetworkFlow.Prom,
+			Name: attributes.NetworkFlow.Prom,
 			Help: "bytes submitted from a source network endpoint to a destination network endpoint",
 		}, labelNames(mr.flowAttrs)).MetricVec, clock.Time, cfg.Config.TTL)
 		register = append(register, mr.flowBytes)
@@ -111,10 +114,10 @@ func newNetReporter(
 		log.Debug("registering network inter-zone metric")
 		mr.interZoneAttrs = attributes.PrometheusGetters(
 			ebpf.RecordStringGetters,
-			provider.For(attributes.BeylaNetworkInterZone))
+			provider.For(attributes.NetworkInterZone))
 
 		mr.interZone = NewExpirer[prometheus.Counter](prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: attributes.BeylaNetworkInterZone.Prom,
+			Name: attributes.NetworkInterZone.Prom,
 			Help: "bytes submitted between different cloud availability zones",
 		}, labelNames(mr.interZoneAttrs)).MetricVec, clock.Time, cfg.Config.TTL)
 		register = append(register, mr.interZone)
@@ -126,7 +129,7 @@ func newNetReporter(
 		mr.promConnect.Register(cfg.Config.Port, cfg.Config.Path, register...)
 	}
 
-	mr.input = input.Subscribe()
+	mr.input = input.Subscribe(msg.SubscriberName("prom.NetReporterInput"))
 	return mr, nil
 }
 

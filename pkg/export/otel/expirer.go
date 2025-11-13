@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package otel
 
 import (
@@ -8,9 +11,9 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/expire"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/otel/metric/api/metric"
+	"go.opentelemetry.io/obi/pkg/export/attributes"
+	"go.opentelemetry.io/obi/pkg/export/expire"
+	"go.opentelemetry.io/obi/pkg/export/otel/metric/api/metric"
 )
 
 var timeNow = time.Now
@@ -82,7 +85,7 @@ func (ex *Expirer[Record, Metric, ValType]) ForRecord(r Record, extraAttrs ...at
 	}
 	recordAttrs, attrValues := ex.recordAttributes(r, extraAttrs...)
 	return ex.metric, ex.entries.GetOrCreate(attrValues, func() attribute.Set {
-		ex.log.With("labelValues", attrValues).Debug("storing new metric label set")
+		ex.log.Debug("storing new metric label set", "labelValues", attrValues)
 		return recordAttrs
 	})
 }

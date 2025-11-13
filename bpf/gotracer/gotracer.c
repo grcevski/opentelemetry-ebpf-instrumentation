@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 //go:build obi_bpf_ignore
 // Copyright Grafana Labs
 //
@@ -21,3 +24,4 @@
 #include "go_kafka_go.c"
 #include "go_sarama.c"
 #include "go_sdk.c"
+#include "go_mongo.c"

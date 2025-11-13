@@ -7,25 +7,26 @@ issues:
 
 formatters:
   enable:
+    - gci
     - gofumpt
-    - goimports
 
   settings:
     gofmt:
       # simplify code: gofmt with `-s` option, true by default
       simplify: true
 
-    goimports:
-      # put imports beginning with prefix after 3rd-party packages;
-      # it's a comma-separated list of prefixes
-      local-prefixes:
-        - github.com/open-telemetry/opentelemetry-ebpf-instrumentation
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/open-telemetry)
+        - prefix(go.opentelemetry.io)
+        - localmodule
 
 linters:
   exclusions:
     paths:
       - ^configs
-      - ^docs
       # this is temporarily imported code that does not rely on us
       - ^pkg/export/otel/metric
     presets:
@@ -245,7 +246,7 @@ output:
 
 # options for analysis running
 run:
-  go: "1.24"
+  go: "1.25"
 
   # Allow multiple parallel golangci-lint instances running.
   # If false (default) - golangci-lint acquires file lock on start.

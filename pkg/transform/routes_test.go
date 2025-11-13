@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package transform
 
 import (
@@ -7,9 +10,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/app/request"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/testutil"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/pipe/msg"
+	"go.opentelemetry.io/obi/pkg/appolly/app/request"
+	"go.opentelemetry.io/obi/pkg/internal/testutil"
+	"go.opentelemetry.io/obi/pkg/pipe/msg"
 )
 
 const testTimeout = 5 * time.Second
@@ -182,7 +185,7 @@ func benchProvider(b *testing.B, unmatch UnmatchType) {
 		{Type: request.EventTypeHTTP, Path: "/users/123/delete"},
 	}
 	go router(b.Context())
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		inCh <- benchmarkInput
 		<-outCh
 	}

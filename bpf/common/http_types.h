@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 
 #include <bpfcore/vmlinux.h>
@@ -27,9 +30,6 @@
 // 100K and above we try to track the response actual time with kretprobes
 #define KPROBES_LARGE_RESPONSE_LEN 100000
 
-// Max of HTTP, HTTP2/GRPC and TCP buffers. Used in sk_msg
-#define MAX_PROTOCOL_BUF_SIZE 256
-
 #define CONN_INFO_FLAG_TRACE 0x1
 
 #define FLAGS_SIZE_BYTES 1
@@ -41,13 +41,6 @@
 
 // Preface PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n https://datatracker.ietf.org/doc/html/rfc7540#section-3.5
 #define MIN_HTTP2_SIZE 24
-
-enum protocol_type : u8 {
-    // Default value, used when the protocol is not known or will be determined/classified
-    // in userspace.
-    k_protocol_type_unknown = 0,
-    k_protocol_type_mysql = 1,
-};
 
 typedef struct call_protocol_args {
     pid_connection_info_t pid_conn;
@@ -61,6 +54,7 @@ typedef struct call_protocol_args {
     u16 orig_dport;
     u16 _pad2;
     u64 u_buf;
+    u64 self_ref_parent_id;
 } call_protocol_args_t;
 
 // Here we keep information on the packets passing through the socket filter
@@ -106,7 +100,7 @@ typedef struct http2_grpc_request {
     tp_info_t tp;
 } http2_grpc_request_t;
 
-// Force emitting struct http_request_trace into the ELF for automatic creation of Golang struct
+// Force emitting struct http_info_t and http2_grpc_request_t into the ELF for automatic creation of Golang struct
 const http_info_t *unused __attribute__((unused));
 const http2_grpc_request_t *unused_http2 __attribute__((unused));
 

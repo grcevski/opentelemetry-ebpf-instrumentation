@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 
 #include <bpfcore/utils.h>
@@ -7,12 +10,15 @@
 #include <common/map_sizing.h>
 #include <common/pin_internal.h>
 
+// fd_map value is updated each time a new connection is detected, either at the client side
+// (sys_connect) or the server side (sys_accept).
+// It associates each connection with the PID/TID of the client/server handling it.
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __type(key, connection_info_part_t); // key: the connection info
     __type(value, fd_info_t);            // value: file descriptor with pid/tid information
     __uint(max_entries, MAX_CONCURRENT_SHARED_REQUESTS);
-    __uint(pinning, BEYLA_PIN_INTERNAL);
+    __uint(pinning, OBI_PIN_INTERNAL);
 } fd_map SEC(".maps");
 
 static __always_inline void get_ephemeral_info(connection_info_part_t *part,

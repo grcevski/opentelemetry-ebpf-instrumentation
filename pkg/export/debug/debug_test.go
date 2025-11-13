@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package debug
 
 import (
@@ -8,11 +11,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	trace2 "go.opentelemetry.io/otel/trace"
 
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/app/request"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/svc"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/pipe/msg"
+	"go.opentelemetry.io/otel/trace"
+
+	"go.opentelemetry.io/obi/pkg/appolly/app/request"
+	"go.opentelemetry.io/obi/pkg/appolly/app/svc"
+	"go.opentelemetry.io/obi/pkg/pipe/msg"
 )
 
 func TestTracePrinterValidEnabled(t *testing.T) {
@@ -56,9 +60,9 @@ func traceFuncHelper(t *testing.T, tracePrinter TracePrinter) string {
 		RequestStart:   10000,
 		Start:          15000,
 		End:            35000,
-		TraceID:        trace2.TraceID{0x1, 0x2, 0x3},
-		SpanID:         trace2.SpanID{0x1, 0x2, 0x3},
-		ParentSpanID:   trace2.SpanID{0x1, 0x2, 0x4},
+		TraceID:        trace.TraceID{0x1, 0x2, 0x3},
+		SpanID:         trace.SpanID{0x1, 0x2, 0x3},
+		ParentSpanID:   trace.SpanID{0x1, 0x2, 0x4},
 		TraceFlags:     1,
 		PeerName:       "peername",
 		HostName:       "hostname",
@@ -96,12 +100,12 @@ func traceFuncHelper(t *testing.T, tracePrinter TracePrinter) string {
 }
 
 func TestTracePrinterResolve_PrinterText(t *testing.T) {
-	expected := "(25µs[20µs]) HTTP 200 method path [peer as peername.otherns:1234]->" +
+	expected := "(25µs[20µs]) HTTP(subType=0) 200 method path(route) [peer as peername.otherns:1234]->" +
 		"[host as hostname.foo:5678] contentLen:1024B responseLen:2048B svc=[foo/bar go]" +
 		" traceparent=[00-01020300000000000000000000000000-0102030000000000[0102040000000000]-01]\n"
 
 	actual := traceFuncHelper(t, TracePrinterText)
-	assert.True(t, strings.HasSuffix(actual, expected))
+	assert.True(t, strings.HasSuffix(actual, expected), actual)
 }
 
 func TestTracePrinterResolve_PrinterCounter(t *testing.T) {

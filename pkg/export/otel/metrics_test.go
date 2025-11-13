@@ -1,10 +1,14 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package otel
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,92 +19,25 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/app/request"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/exec"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/imetrics"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/pipe/global"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/svc"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes"
-	attr "github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes/names"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/instrumentations"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/pipe/msg"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/pipe/swarm"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/test/collector"
+	"go.opentelemetry.io/otel/attribute"
+
+	"go.opentelemetry.io/obi/internal/test/collector"
+	"go.opentelemetry.io/obi/pkg/appolly/app/request"
+	"go.opentelemetry.io/obi/pkg/appolly/app/svc"
+	"go.opentelemetry.io/obi/pkg/appolly/discover/exec"
+	"go.opentelemetry.io/obi/pkg/export/attributes"
+	attr "go.opentelemetry.io/obi/pkg/export/attributes/names"
+	"go.opentelemetry.io/obi/pkg/export/imetrics"
+	"go.opentelemetry.io/obi/pkg/export/instrumentations"
+	"go.opentelemetry.io/obi/pkg/export/otel/otelcfg"
+	"go.opentelemetry.io/obi/pkg/pipe/global"
+	"go.opentelemetry.io/obi/pkg/pipe/msg"
 )
 
 var fakeMux = sync.Mutex{}
 
-func TestHTTPMetricsEndpointOptions(t *testing.T) {
-	defer restoreEnvAfterExecution()()
-	mcfg := MetricsConfig{
-		CommonEndpoint:  "https://localhost:3131",
-		MetricsEndpoint: "https://localhost:3232/v1/metrics",
-		Instrumentations: []string{
-			instrumentations.InstrumentationHTTP,
-		},
-	}
-
-	t.Run("testing with two endpoints", func(t *testing.T) {
-		testMetricsHTTPOptions(t, otlpOptions{Endpoint: "localhost:3232", URLPath: "/v1/metrics", Headers: map[string]string{}}, &mcfg)
-	})
-
-	mcfg = MetricsConfig{
-		CommonEndpoint: "https://localhost:3131/otlp",
-		Instrumentations: []string{
-			instrumentations.InstrumentationHTTP,
-		},
-	}
-
-	t.Run("testing with only common endpoint", func(t *testing.T) {
-		testMetricsHTTPOptions(t, otlpOptions{Endpoint: "localhost:3131", URLPath: "/otlp/v1/metrics", Headers: map[string]string{}}, &mcfg)
-	})
-
-	mcfg = MetricsConfig{
-		CommonEndpoint:  "https://localhost:3131",
-		MetricsEndpoint: "http://localhost:3232",
-		Instrumentations: []string{
-			instrumentations.InstrumentationHTTP,
-		},
-	}
-	t.Run("testing with insecure endpoint", func(t *testing.T) {
-		testMetricsHTTPOptions(t, otlpOptions{Endpoint: "localhost:3232", Insecure: true, Headers: map[string]string{}}, &mcfg)
-	})
-
-	mcfg = MetricsConfig{
-		CommonEndpoint:     "https://localhost:3232",
-		InsecureSkipVerify: true,
-		Instrumentations: []string{
-			instrumentations.InstrumentationHTTP,
-		},
-	}
-
-	t.Run("testing with skip TLS verification", func(t *testing.T) {
-		testMetricsHTTPOptions(t, otlpOptions{Endpoint: "localhost:3232", URLPath: "/v1/metrics", SkipTLSVerify: true, Headers: map[string]string{}}, &mcfg)
-	})
-}
-
-func testMetricsHTTPOptions(t *testing.T, expected otlpOptions, mcfg *MetricsConfig) {
-	defer restoreEnvAfterExecution()()
-	opts, err := getHTTPMetricEndpointOptions(mcfg)
-	require.NoError(t, err)
-	assert.Equal(t, expected, opts)
-}
-
-func TestMissingSchemeInMetricsEndpoint(t *testing.T) {
-	defer restoreEnvAfterExecution()()
-	opts, err := getHTTPMetricEndpointOptions(&MetricsConfig{CommonEndpoint: "http://foo:3030", Instrumentations: []string{instrumentations.InstrumentationHTTP}})
-	require.NoError(t, err)
-	require.NotEmpty(t, opts)
-
-	_, err = getHTTPMetricEndpointOptions(&MetricsConfig{CommonEndpoint: "foo:3030", Instrumentations: []string{instrumentations.InstrumentationHTTP}})
-	require.Error(t, err)
-
-	_, err = getHTTPMetricEndpointOptions(&MetricsConfig{CommonEndpoint: "foo", Instrumentations: []string{instrumentations.InstrumentationHTTP}})
-	require.Error(t, err)
-}
-
 func TestMetrics_InternalInstrumentation(t *testing.T) {
-	defer restoreEnvAfterExecution()()
+	defer otelcfg.RestoreEnvAfterExecution()()
 	// fake OTEL collector server
 	coll := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
 		rw.WriteHeader(http.StatusOK)
@@ -117,12 +54,14 @@ func TestMetrics_InternalInstrumentation(t *testing.T) {
 	exportMetrics := msg.NewQueue[[]request.Span](msg.ChannelBufferLen(10))
 	processEvents := msg.NewQueue[exec.ProcessEvent](msg.ChannelBufferLen(20))
 	internalMetrics := &fakeInternalMetrics{}
-	reporter, err := ReportMetrics(&global.ContextInfo{
-		Metrics: internalMetrics,
-	}, &MetricsConfig{
+	mcfg := &otelcfg.MetricsConfig{
 		CommonEndpoint: coll.URL, Interval: 10 * time.Millisecond, ReportersCacheLen: 16,
-		Features: []string{FeatureApplication}, Instrumentations: []string{instrumentations.InstrumentationHTTP},
-	}, &attributes.SelectorConfig{}, exportMetrics, processEvents,
+		Features: []string{otelcfg.FeatureApplication}, Instrumentations: []string{instrumentations.InstrumentationHTTP},
+	}
+	reporter, err := ReportMetrics(&global.ContextInfo{
+		Metrics:             internalMetrics,
+		OTELMetricsExporter: &otelcfg.MetricsExporterInstancer{Cfg: mcfg},
+	}, mcfg, &attributes.SelectorConfig{}, request.UnresolvedNames{}, exportMetrics, processEvents,
 	)(t.Context())
 	require.NoError(t, err)
 	go reporter(t.Context())
@@ -191,130 +130,6 @@ type fakeInternalMetrics struct {
 	errs atomic.Int32
 }
 
-func TestGRPCMetricsEndpointOptions(t *testing.T) {
-	defer restoreEnvAfterExecution()()
-	t.Run("do not accept URLs without a scheme", func(t *testing.T) {
-		_, err := getGRPCMetricEndpointOptions(&MetricsConfig{CommonEndpoint: "foo:3939"})
-		require.Error(t, err)
-	})
-
-	mcfg := MetricsConfig{
-		CommonEndpoint:   "https://localhost:3131",
-		MetricsEndpoint:  "https://localhost:3232",
-		Instrumentations: []string{instrumentations.InstrumentationHTTP},
-	}
-
-	t.Run("testing with two endpoints", func(t *testing.T) {
-		testMetricsGRPCOptions(t, otlpOptions{Endpoint: "localhost:3232", Headers: map[string]string{}}, &mcfg)
-	})
-
-	mcfg = MetricsConfig{
-		CommonEndpoint:   "https://localhost:3131",
-		Instrumentations: []string{instrumentations.InstrumentationHTTP},
-	}
-
-	t.Run("testing with only common endpoint", func(t *testing.T) {
-		testMetricsGRPCOptions(t, otlpOptions{Endpoint: "localhost:3131", Headers: map[string]string{}}, &mcfg)
-	})
-
-	mcfg = MetricsConfig{
-		CommonEndpoint:   "https://localhost:3131",
-		MetricsEndpoint:  "http://localhost:3232",
-		Instrumentations: []string{instrumentations.InstrumentationHTTP},
-	}
-	t.Run("testing with insecure endpoint", func(t *testing.T) {
-		testMetricsGRPCOptions(t, otlpOptions{Endpoint: "localhost:3232", Insecure: true, Headers: map[string]string{}}, &mcfg)
-	})
-
-	mcfg = MetricsConfig{
-		CommonEndpoint:     "https://localhost:3232",
-		InsecureSkipVerify: true,
-		Instrumentations:   []string{instrumentations.InstrumentationHTTP},
-	}
-
-	t.Run("testing with skip TLS verification", func(t *testing.T) {
-		testMetricsGRPCOptions(t, otlpOptions{Endpoint: "localhost:3232", SkipTLSVerify: true, Headers: map[string]string{}}, &mcfg)
-	})
-}
-
-func testMetricsGRPCOptions(t *testing.T, expected otlpOptions, mcfg *MetricsConfig) {
-	defer restoreEnvAfterExecution()()
-	opts, err := getGRPCMetricEndpointOptions(mcfg)
-	require.NoError(t, err)
-	assert.Equal(t, expected, opts)
-}
-
-func TestMetricsSetupHTTP_Protocol(t *testing.T) {
-	testCases := []struct {
-		Endpoint               string
-		ProtoVal               Protocol
-		MetricProtoVal         Protocol
-		ExpectedProtoEnv       string
-		ExpectedMetricProtoEnv string
-	}{
-		{ProtoVal: "", MetricProtoVal: "", ExpectedProtoEnv: "", ExpectedMetricProtoEnv: "http/protobuf"},
-		{ProtoVal: "", MetricProtoVal: "foo", ExpectedProtoEnv: "", ExpectedMetricProtoEnv: "foo"},
-		{ProtoVal: "bar", MetricProtoVal: "", ExpectedProtoEnv: "bar", ExpectedMetricProtoEnv: ""},
-		{ProtoVal: "bar", MetricProtoVal: "foo", ExpectedProtoEnv: "", ExpectedMetricProtoEnv: "foo"},
-		{Endpoint: "http://foo:4317", ProtoVal: "", MetricProtoVal: "", ExpectedProtoEnv: "", ExpectedMetricProtoEnv: "grpc"},
-		{Endpoint: "http://foo:4317", ProtoVal: "", MetricProtoVal: "foo", ExpectedProtoEnv: "", ExpectedMetricProtoEnv: "foo"},
-		{Endpoint: "http://foo:4317", ProtoVal: "bar", MetricProtoVal: "", ExpectedProtoEnv: "bar", ExpectedMetricProtoEnv: ""},
-		{Endpoint: "http://foo:4317", ProtoVal: "bar", MetricProtoVal: "foo", ExpectedProtoEnv: "", ExpectedMetricProtoEnv: "foo"},
-		{Endpoint: "http://foo:14317", ProtoVal: "", MetricProtoVal: "", ExpectedProtoEnv: "", ExpectedMetricProtoEnv: "grpc"},
-		{Endpoint: "http://foo:14317", ProtoVal: "", MetricProtoVal: "foo", ExpectedProtoEnv: "", ExpectedMetricProtoEnv: "foo"},
-		{Endpoint: "http://foo:14317", ProtoVal: "bar", MetricProtoVal: "", ExpectedProtoEnv: "bar", ExpectedMetricProtoEnv: ""},
-		{Endpoint: "http://foo:14317", ProtoVal: "bar", MetricProtoVal: "foo", ExpectedProtoEnv: "", ExpectedMetricProtoEnv: "foo"},
-		{Endpoint: "http://foo:4318", ProtoVal: "", MetricProtoVal: "", ExpectedProtoEnv: "", ExpectedMetricProtoEnv: "http/protobuf"},
-		{Endpoint: "http://foo:4318", ProtoVal: "", MetricProtoVal: "foo", ExpectedProtoEnv: "", ExpectedMetricProtoEnv: "foo"},
-		{Endpoint: "http://foo:4318", ProtoVal: "bar", MetricProtoVal: "", ExpectedProtoEnv: "bar", ExpectedMetricProtoEnv: ""},
-		{Endpoint: "http://foo:4318", ProtoVal: "bar", MetricProtoVal: "foo", ExpectedProtoEnv: "", ExpectedMetricProtoEnv: "foo"},
-		{Endpoint: "http://foo:24318", ProtoVal: "", MetricProtoVal: "", ExpectedProtoEnv: "", ExpectedMetricProtoEnv: "http/protobuf"},
-		{Endpoint: "http://foo:24318", ProtoVal: "", MetricProtoVal: "foo", ExpectedProtoEnv: "", ExpectedMetricProtoEnv: "foo"},
-		{Endpoint: "http://foo:24318", ProtoVal: "bar", MetricProtoVal: "", ExpectedProtoEnv: "bar", ExpectedMetricProtoEnv: ""},
-		{Endpoint: "http://foo:24318", ProtoVal: "bar", MetricProtoVal: "foo", ExpectedProtoEnv: "", ExpectedMetricProtoEnv: "foo"},
-	}
-	for _, tc := range testCases {
-		t.Run(tc.Endpoint+"/"+string(tc.ProtoVal)+"/"+string(tc.MetricProtoVal), func(t *testing.T) {
-			defer restoreEnvAfterExecution()()
-			_, err := getHTTPMetricEndpointOptions(&MetricsConfig{
-				CommonEndpoint:   "http://host:3333",
-				MetricsEndpoint:  tc.Endpoint,
-				Protocol:         tc.ProtoVal,
-				MetricsProtocol:  tc.MetricProtoVal,
-				Instrumentations: []string{instrumentations.InstrumentationHTTP},
-			})
-			require.NoError(t, err)
-			assert.Equal(t, tc.ExpectedProtoEnv, os.Getenv(envProtocol))
-			assert.Equal(t, tc.ExpectedMetricProtoEnv, os.Getenv(envMetricsProtocol))
-		})
-	}
-}
-
-func TestMetricSetupHTTP_DoNotOverrideEnv(t *testing.T) {
-	t.Run("setting both variables", func(t *testing.T) {
-		defer restoreEnvAfterExecution()()
-		t.Setenv(envProtocol, "foo-proto")
-		t.Setenv(envMetricsProtocol, "bar-proto")
-		_, err := getHTTPMetricEndpointOptions(&MetricsConfig{
-			CommonEndpoint: "http://host:3333", Protocol: "foo", MetricsProtocol: "bar", Instrumentations: []string{instrumentations.InstrumentationHTTP},
-		})
-		require.NoError(t, err)
-		assert.Equal(t, "foo-proto", os.Getenv(envProtocol))
-		assert.Equal(t, "bar-proto", os.Getenv(envMetricsProtocol))
-	})
-	t.Run("setting only proto env var", func(t *testing.T) {
-		defer restoreEnvAfterExecution()()
-		t.Setenv(envProtocol, "foo-proto")
-		_, err := getHTTPMetricEndpointOptions(&MetricsConfig{
-			CommonEndpoint: "http://host:3333", Protocol: "foo", Instrumentations: []string{instrumentations.InstrumentationHTTP},
-		})
-		require.NoError(t, err)
-		_, ok := os.LookupEnv(envMetricsProtocol)
-		assert.False(t, ok)
-		assert.Equal(t, "foo-proto", os.Getenv(envProtocol))
-	})
-}
-
 type InstrTest struct {
 	name      string
 	instr     []string
@@ -323,7 +138,7 @@ type InstrTest struct {
 }
 
 func TestAppMetrics_ByInstrumentation(t *testing.T) {
-	defer restoreEnvAfterExecution()()
+	defer otelcfg.RestoreEnvAfterExecution()()
 
 	tests := []InstrTest{
 		{
@@ -423,12 +238,9 @@ func TestAppMetrics_ByInstrumentation(t *testing.T) {
 			otlp, err := collector.Start(ctx)
 			require.NoError(t, err)
 
-			now := syncedClock{now: time.Now()}
-			timeNow = now.Now
-
 			metrics := msg.NewQueue[[]request.Span](msg.ChannelBufferLen(20))
-			otelExporter := makeExporter(ctx, t, tt.instr, otlp, metrics)
-
+			processEvents := msg.NewQueue[exec.ProcessEvent](msg.ChannelBufferLen(20))
+			otelExporter := makeMetricsReporter(ctx, t, tt.instr, []string{otelcfg.FeatureApplication}, otlp, metrics, processEvents).reportMetrics
 			require.NoError(t, err)
 
 			go otelExporter(ctx)
@@ -474,15 +286,15 @@ func TestAppMetrics_ByInstrumentation(t *testing.T) {
 				assert.Equal(t, tt.expected[i], m[i].Name)
 			}
 
-			restoreEnvAfterExecution()
+			otelcfg.RestoreEnvAfterExecution()
 		})
 	}
 }
 
 func TestAppMetrics_ResourceAttributes(t *testing.T) {
-	defer restoreEnvAfterExecution()()
+	defer otelcfg.RestoreEnvAfterExecution()()
 
-	t.Setenv(envResourceAttrs, "deployment.environment=production,source=upstream.beyla")
+	t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "deployment.environment=production,source=upstream.beyla")
 
 	ctx := t.Context()
 
@@ -493,8 +305,8 @@ func TestAppMetrics_ResourceAttributes(t *testing.T) {
 	timeNow = now.Now
 
 	metrics := msg.NewQueue[[]request.Span](msg.ChannelBufferLen(20))
-	otelExporter := makeExporter(ctx, t, []string{instrumentations.InstrumentationHTTP}, otlp, metrics)
-
+	processEvents := msg.NewQueue[exec.ProcessEvent](msg.ChannelBufferLen(20))
+	otelExporter := makeMetricsReporter(ctx, t, []string{instrumentations.InstrumentationHTTP}, []string{otelcfg.FeatureApplication}, otlp, metrics, processEvents).reportMetrics
 	go otelExporter(ctx)
 
 	metrics.Send([]request.Span{
@@ -508,36 +320,9 @@ func TestAppMetrics_ResourceAttributes(t *testing.T) {
 	assert.Equal(t, "upstream.beyla", attributes["source"])
 }
 
-func TestMetricsConfig_Enabled(t *testing.T) {
-	assert.True(t, (&MetricsConfig{Features: []string{FeatureApplication, FeatureNetwork}, CommonEndpoint: "foo"}).Enabled())
-	assert.True(t, (&MetricsConfig{Features: []string{FeatureApplication}, MetricsEndpoint: "foo"}).Enabled())
-	assert.True(t, (&MetricsConfig{MetricsEndpoint: "foo", Features: []string{FeatureNetwork}}).Enabled())
-	assert.True(t, (&MetricsConfig{
-		Features:             []string{FeatureNetwork},
-		OTLPEndpointProvider: func() (string, bool) { return "something", false },
-	}).Enabled())
-	assert.True(t, (&MetricsConfig{
-		Features:             []string{FeatureNetwork},
-		OTLPEndpointProvider: func() (string, bool) { return "something", true },
-	}).Enabled())
-}
-
-func TestMetricsConfig_Disabled(t *testing.T) {
-	assert.False(t, (&MetricsConfig{Features: []string{FeatureApplication}}).Enabled())
-	assert.False(t, (&MetricsConfig{Features: []string{FeatureNetwork, FeatureApplication}}).Enabled())
-	assert.False(t, (&MetricsConfig{Features: []string{FeatureNetwork}}).Enabled())
-	// application feature is not enabled
-	assert.False(t, (&MetricsConfig{CommonEndpoint: "foo"}).Enabled())
-	assert.False(t, (&MetricsConfig{}).Enabled())
-	assert.False(t, (&MetricsConfig{
-		Features:             []string{FeatureApplication},
-		OTLPEndpointProvider: func() (string, bool) { return "", false },
-	}).Enabled())
-}
-
 func TestMetricsDiscarded(t *testing.T) {
-	mc := MetricsConfig{
-		Features: []string{FeatureApplication},
+	mc := otelcfg.MetricsConfig{
+		Features: []string{otelcfg.FeatureApplication},
 	}
 	mr := MetricsReporter{
 		cfg: &mc,
@@ -581,8 +366,8 @@ func TestMetricsDiscarded(t *testing.T) {
 }
 
 func TestSpanMetricsDiscarded(t *testing.T) {
-	mc := MetricsConfig{
-		Features: []string{FeatureApplication},
+	mc := otelcfg.MetricsConfig{
+		Features: []string{otelcfg.FeatureSpan},
 	}
 	mr := MetricsReporter{
 		cfg: &mc,
@@ -625,22 +410,54 @@ func TestSpanMetricsDiscarded(t *testing.T) {
 	}
 }
 
-func TestMetricsInterval(t *testing.T) {
-	cfg := MetricsConfig{
-		OTELIntervalMS: 60_000,
+func TestSpanMetricsDiscardedGraph(t *testing.T) {
+	mc := otelcfg.MetricsConfig{
+		Features: []string{otelcfg.FeatureGraph},
 	}
-	t.Run("If only OTEL is defined, it uses that value", func(t *testing.T) {
-		assert.Equal(t, 60*time.Second, cfg.GetInterval())
-	})
-	cfg.Interval = 5 * time.Second
-	t.Run("Beyla interval takes precedence over OTEL", func(t *testing.T) {
-		assert.Equal(t, 5*time.Second, cfg.GetInterval())
-	})
+	mr := MetricsReporter{
+		cfg: &mc,
+	}
+
+	svcNoExport := svc.Attrs{}
+
+	svcExportMetrics := svc.Attrs{}
+	svcExportMetrics.SetExportsOTelMetrics()
+
+	svcExportSpanMetrics := svc.Attrs{}
+	svcExportSpanMetrics.SetExportsOTelMetricsSpan()
+
+	tests := []struct {
+		name      string
+		span      request.Span
+		discarded bool
+	}{
+		{
+			name:      "Foo span is not filtered",
+			span:      request.Span{Service: svcNoExport, Type: request.EventTypeHTTPClient, Method: "GET", Route: "/foo", RequestStart: 100, End: 200},
+			discarded: false,
+		},
+		{
+			name:      "/v1/metrics span is not filtered",
+			span:      request.Span{Service: svcExportMetrics, Type: request.EventTypeHTTPClient, Method: "GET", Route: "/v1/metrics", RequestStart: 100, End: 200},
+			discarded: false,
+		},
+		{
+			name:      "/v1/traces span is filtered",
+			span:      request.Span{Service: svcExportSpanMetrics, Type: request.EventTypeHTTPClient, Method: "GET", Route: "/v1/traces", RequestStart: 100, End: 200},
+			discarded: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.discarded, !otelSpanMetricsAccepted(&tt.span, &mr), tt.name)
+		})
+	}
 }
 
 func TestProcessPIDEvents(t *testing.T) {
-	mc := MetricsConfig{
-		Features: []string{FeatureApplication},
+	mc := otelcfg.MetricsConfig{
+		Features: []string{otelcfg.FeatureApplication},
 	}
 	mr := MetricsReporter{
 		cfg:        &mc,
@@ -707,7 +524,7 @@ func (f *fakeInternalMetrics) SumCount() (sum, count int) {
 
 func readNChan(t require.TestingT, inCh <-chan collector.MetricRecord, numRecords int, timeout time.Duration) []collector.MetricRecord {
 	records := []collector.MetricRecord{}
-	for i := 0; i < numRecords; i++ {
+	for range numRecords {
 		select {
 		case item := <-inCh:
 			records = append(records, item)
@@ -719,32 +536,89 @@ func readNChan(t require.TestingT, inCh <-chan collector.MetricRecord, numRecord
 	return records
 }
 
-func makeExporter(
-	ctx context.Context, t *testing.T, instrumentations []string, otlp *collector.TestCollector,
-	input *msg.Queue[[]request.Span],
-) swarm.RunFunc {
-	processEvents := msg.NewQueue[exec.ProcessEvent](msg.ChannelBufferLen(20))
-
-	otelExporter, err := ReportMetrics(
-		&global.ContextInfo{}, &MetricsConfig{
-			Interval:          50 * time.Millisecond,
-			CommonEndpoint:    otlp.ServerEndpoint,
-			MetricsProtocol:   ProtocolHTTPProtobuf,
-			Features:          []string{FeatureApplication},
-			TTL:               30 * time.Minute,
-			ReportersCacheLen: 100,
-			Instrumentations:  instrumentations,
-		}, &attributes.SelectorConfig{
+func makeMetricsReporter(
+	ctx context.Context, t *testing.T, instrumentations []string, features []string, otlp *collector.TestCollector,
+	input *msg.Queue[[]request.Span], processEvents *msg.Queue[exec.ProcessEvent],
+) *MetricsReporter {
+	mcfg := &otelcfg.MetricsConfig{
+		Interval:          50 * time.Millisecond,
+		CommonEndpoint:    otlp.ServerEndpoint,
+		MetricsProtocol:   otelcfg.ProtocolHTTPProtobuf,
+		Features:          features,
+		TTL:               30 * time.Minute,
+		ReportersCacheLen: 100,
+		Instrumentations:  instrumentations,
+	}
+	mr, err := newMetricsReporter(
+		ctx,
+		&global.ContextInfo{OTELMetricsExporter: &otelcfg.MetricsExporterInstancer{Cfg: mcfg}},
+		mcfg,
+		&attributes.SelectorConfig{
 			SelectionCfg: attributes.Selection{
 				attributes.HTTPServerDuration.Section: attributes.InclusionLists{
 					Include: []string{"url.path"},
 				},
 			},
-		}, input, processEvents)(ctx)
+		},
+		request.UnresolvedNames{},
+		input,
+		processEvents)
 
 	require.NoError(t, err)
+	return mr
+}
 
-	return otelExporter
+func TestAppMetrics_TracesHostInfo(t *testing.T) {
+	ctx := t.Context()
+
+	otlp, err := collector.Start(ctx)
+	require.NoError(t, err)
+
+	now := syncedClock{now: time.Now()}
+	timeNow = now.Now
+
+	metrics := msg.NewQueue[[]request.Span](msg.ChannelBufferLen(20))
+	processEvents := msg.NewQueue[exec.ProcessEvent](msg.ChannelBufferLen(20))
+	mr := makeMetricsReporter(ctx, t, []string{instrumentations.InstrumentationHTTP}, []string{otelcfg.FeatureApplication, otelcfg.FeatureApplicationHost}, otlp, metrics, processEvents)
+	otelExporter := mr.reportMetrics
+	go otelExporter(ctx)
+
+	assert.Len(t, otlp.Records(), 0, "metric reported before the first span is sent")
+
+	processEvents.Send(exec.ProcessEvent{
+		Type: exec.ProcessEventCreated,
+		File: &exec.FileInfo{
+			Service: svc.Attrs{
+				UID: svc.UID{Instance: "foo"},
+			},
+		},
+	})
+
+	metrics.Send([]request.Span{
+		{Service: svc.Attrs{UID: svc.UID{Instance: "foo"}}, Type: request.EventTypeHTTP, Path: "/foo", RequestStart: 100, End: 200},
+	})
+
+	test.Eventually(t, timeout, func(t require.TestingT) {
+		assert.NotEmpty(t, mr.hostInfo.entries.All(),
+			"traces_host_info metric has not been created yet")
+	})
+
+	// Check expiration logic
+	processEvents.Send(exec.ProcessEvent{
+		Type: exec.ProcessEventTerminated,
+		File: &exec.FileInfo{
+			Service: svc.Attrs{
+				UID: svc.UID{Instance: "foo"},
+			},
+		},
+	})
+
+	now.Advance(50 * time.Minute)
+
+	test.Eventually(t, timeout, func(t require.TestingT) {
+		assert.Empty(t, mr.hostInfo.entries.All(),
+			"traces_host_info metric has not expired yet") // The entry should be expired
+	})
 }
 
 func TestMetricResourceAttributes(t *testing.T) {
@@ -923,8 +797,8 @@ func TestMetricResourceAttributes(t *testing.T) {
 			t.Logf("Attributes in test %s:", tc.name)
 			for _, a := range attrs {
 				keyStr := string(a.Key)
-				t.Logf("   - %s = %s", keyStr, a.Value.AsString())
-				attrMap[keyStr] = a.Value.AsString()
+				t.Logf("   - %s = %s", keyStr, a.Value.Emit())
+				attrMap[keyStr] = a.Value.Emit()
 			}
 
 			for _, attrName := range tc.expectedAttrs {
@@ -975,5 +849,397 @@ func TestClientSpanToUninstrumentedService(t *testing.T) {
 	}
 	if ClientSpanToUninstrumentedService(&tracker, spanNoHost) {
 		t.Errorf("Expected false for span with no HostName, got true")
+	}
+}
+
+type mockEventMetrics struct {
+	createCalls []*TargetMetrics
+	deleteCalls []*TargetMetrics
+}
+
+func newMockEventMetrics() *mockEventMetrics {
+	return &mockEventMetrics{
+		createCalls: make([]*TargetMetrics, 0),
+		deleteCalls: make([]*TargetMetrics, 0),
+	}
+}
+
+func (m *mockEventMetrics) createEventMetrics(targetMetrics *TargetMetrics) {
+	m.createCalls = append(m.createCalls, targetMetrics)
+}
+
+func (m *mockEventMetrics) deleteEventMetrics(targetMetrics *TargetMetrics) {
+	m.deleteCalls = append(m.deleteCalls, targetMetrics)
+}
+
+func TestHandleProcessEventCreated(t *testing.T) {
+	tests := []struct {
+		name           string
+		setup          func(*MetricsReporter, *mockEventMetrics)
+		event          exec.ProcessEvent
+		expectedCreate []svc.Attrs
+		expectedDelete []svc.Attrs
+		expectedMap    map[svc.UID]svc.Attrs
+	}{
+		{
+			name: "new service - fresh start",
+			setup: func(r *MetricsReporter, m *mockEventMetrics) {
+				// No setup needed for fresh start
+			},
+			event: exec.ProcessEvent{
+				Type: exec.ProcessEventCreated,
+				File: &exec.FileInfo{
+					Pid: 1234,
+					Service: svc.Attrs{
+						UID: svc.UID{
+							Name:      "test-service",
+							Namespace: "default",
+							Instance:  "instance-1",
+						},
+						HostName: "test-host",
+					},
+				},
+			},
+			expectedCreate: []svc.Attrs{
+				{
+					UID: svc.UID{
+						Name:      "test-service",
+						Namespace: "default",
+						Instance:  "instance-1",
+					},
+					HostName: "test-host",
+				},
+			},
+			expectedDelete: nil,
+			expectedMap: map[svc.UID]svc.Attrs{
+				{
+					Name:      "test-service",
+					Namespace: "default",
+					Instance:  "instance-1",
+				}: {
+					UID: svc.UID{
+						Name:      "test-service",
+						Namespace: "default",
+						Instance:  "instance-1",
+					},
+					HostName: "test-host",
+				},
+			},
+		},
+		{
+			name: "same service UID with updated attributes",
+			setup: func(r *MetricsReporter, m *mockEventMetrics) {
+				// Pre-populate service map with existing service
+				uid := svc.UID{
+					Name:      "test-service",
+					Namespace: "default",
+					Instance:  "instance-1",
+				}
+				r.targetMetrics[uid] = attrsToTargetMetrics(r, &svc.Attrs{
+					UID:      uid,
+					HostName: "old-host",
+				})
+			},
+			event: exec.ProcessEvent{
+				Type: exec.ProcessEventCreated,
+				File: &exec.FileInfo{
+					Pid: 1234,
+					Service: svc.Attrs{
+						UID: svc.UID{
+							Name:      "test-service",
+							Namespace: "default",
+							Instance:  "instance-1",
+						},
+						HostName: "new-host",
+					},
+				},
+			},
+			expectedCreate: []svc.Attrs{
+				{
+					UID: svc.UID{
+						Name:      "test-service",
+						Namespace: "default",
+						Instance:  "instance-1",
+					},
+					HostName: "new-host",
+				},
+			},
+			expectedDelete: []svc.Attrs{
+				{
+					UID: svc.UID{
+						Name:      "test-service",
+						Namespace: "default",
+						Instance:  "instance-1",
+					},
+					HostName: "old-host",
+				},
+			},
+			expectedMap: map[svc.UID]svc.Attrs{
+				{
+					Name:      "test-service",
+					Namespace: "default",
+					Instance:  "instance-1",
+				}: {
+					UID: svc.UID{
+						Name:      "test-service",
+						Namespace: "default",
+						Instance:  "instance-1",
+					},
+					HostName: "new-host",
+				},
+			},
+		},
+		{
+			name: "PID changing service (stale UID with existing attributes)",
+			setup: func(r *MetricsReporter, m *mockEventMetrics) {
+				// Setup: PID 1234 is already tracked with stale UID
+				staleUID := svc.UID{
+					Name:      "old-service",
+					Namespace: "default",
+					Instance:  "instance-1",
+				}
+				r.pidTracker.AddPID(1234, staleUID)
+
+				// Add stale service to service map
+				r.targetMetrics[staleUID] = attrsToTargetMetrics(r, &svc.Attrs{
+					UID:      staleUID,
+					HostName: "test-host",
+				})
+			},
+			event: exec.ProcessEvent{
+				Type: exec.ProcessEventCreated,
+				File: &exec.FileInfo{
+					Pid: 1234,
+					Service: svc.Attrs{
+						UID: svc.UID{
+							Name:      "new-service",
+							Namespace: "default",
+							Instance:  "instance-1",
+						},
+						HostName: "test-host",
+					},
+				},
+			},
+			expectedCreate: []svc.Attrs{
+				{
+					UID: svc.UID{
+						Name:      "new-service",
+						Namespace: "default",
+						Instance:  "instance-1",
+					},
+					HostName: "test-host",
+				},
+			},
+			expectedDelete: []svc.Attrs{
+				{
+					UID: svc.UID{
+						Name:      "old-service",
+						Namespace: "default",
+						Instance:  "instance-1",
+					},
+					HostName: "test-host",
+				},
+			},
+			expectedMap: map[svc.UID]svc.Attrs{
+				{
+					Name:      "new-service",
+					Namespace: "default",
+					Instance:  "instance-1",
+				}: {
+					UID: svc.UID{
+						Name:      "new-service",
+						Namespace: "default",
+						Instance:  "instance-1",
+					},
+					HostName: "test-host",
+				},
+			},
+		},
+		{
+			name: "PID changing service (stale UID without existing attributes)",
+			setup: func(r *MetricsReporter, m *mockEventMetrics) {
+				// Setup: PID 1234 is already tracked with stale UID, but no service map entry
+				staleUID := svc.UID{
+					Name:      "old-service",
+					Namespace: "default",
+					Instance:  "instance-1",
+				}
+				r.pidTracker.AddPID(1234, staleUID)
+				// Note: deliberately NOT adding to serviceMap to test this edge case
+			},
+			event: exec.ProcessEvent{
+				Type: exec.ProcessEventCreated,
+				File: &exec.FileInfo{
+					Pid: 1234,
+					Service: svc.Attrs{
+						UID: svc.UID{
+							Name:      "new-service",
+							Namespace: "default",
+							Instance:  "instance-1",
+						},
+						HostName: "test-host",
+					},
+				},
+			},
+			expectedCreate: nil,
+			expectedDelete: nil,
+			expectedMap: map[svc.UID]svc.Attrs{
+				{
+					Name:      "new-service",
+					Namespace: "default",
+					Instance:  "instance-1",
+				}: {
+					UID: svc.UID{
+						Name:      "new-service",
+						Namespace: "default",
+						Instance:  "instance-1",
+					},
+					HostName: "test-host",
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockEventsStore := mockEventMetrics{}
+
+			// Create a minimal metricsReporter with mocks
+			reporter := &MetricsReporter{
+				cfg:                &otelcfg.MetricsConfig{},
+				log:                slog.Default(),
+				targetMetrics:      make(map[svc.UID]*TargetMetrics),
+				pidTracker:         NewPidServiceTracker(),
+				createEventMetrics: mockEventsStore.createEventMetrics,
+				deleteEventMetrics: mockEventsStore.deleteEventMetrics,
+			}
+
+			// Setup any initial state
+			tt.setup(reporter, &mockEventsStore)
+
+			// Execute the function under test
+			reporter.onProcessEvent(&tt.event)
+
+			// Verify create calls
+			for i, cc := range tt.expectedCreate {
+				c := attrsToTargetMetrics(reporter, &cc)
+				resourcesMatch(t, c, mockEventsStore.createCalls[i])
+			}
+
+			// Verify delete calls
+			for i, cc := range tt.expectedDelete {
+				c := attrsToTargetMetrics(reporter, &cc)
+				resourcesMatch(t, c, mockEventsStore.deleteCalls[i])
+			}
+
+			tm := map[svc.UID]*TargetMetrics{}
+
+			for uid, attrs := range tt.expectedMap {
+				tm[uid] = attrsToTargetMetrics(reporter, &attrs)
+			}
+
+			// Verify service map state
+			assert.Equal(t, tm, reporter.targetMetrics,
+				"Service map should match expected state")
+		})
+	}
+}
+
+func TestHandleProcessEventCreated_EdgeCases(t *testing.T) {
+	t.Run("multiple PIDs for same service", func(t *testing.T) {
+		mockEventsStore := newMockEventMetrics()
+
+		reporter := &MetricsReporter{
+			cfg:                &otelcfg.MetricsConfig{},
+			log:                slog.Default(),
+			targetMetrics:      make(map[svc.UID]*TargetMetrics),
+			pidTracker:         NewPidServiceTracker(),
+			createEventMetrics: mockEventsStore.createEventMetrics,
+			deleteEventMetrics: mockEventsStore.deleteEventMetrics,
+		}
+
+		uid := svc.UID{Name: "multi-pid-service", Namespace: "default", Instance: "instance-1"}
+		service := svc.Attrs{UID: uid, HostName: "test-host"}
+
+		// Add first PID
+		event1 := exec.ProcessEvent{
+			Type: exec.ProcessEventCreated,
+			File: &exec.FileInfo{Pid: 1111, Service: service},
+		}
+		reporter.onProcessEvent(&event1)
+
+		// Add second PID for same service
+		event2 := exec.ProcessEvent{
+			Type: exec.ProcessEventCreated,
+			File: &exec.FileInfo{Pid: 2222, Service: service},
+		}
+		reporter.onProcessEvent(&event2)
+
+		// Service should only be created once initially, then updated once for the same UID
+		assert.Len(t, mockEventsStore.createCalls, 2) // One for each PID event
+		assert.Len(t, mockEventsStore.deleteCalls, 1) // One delete when second event updates existing service
+	})
+
+	t.Run("concurrent service updates", func(t *testing.T) {
+		mockEventsStore := newMockEventMetrics()
+
+		reporter := &MetricsReporter{
+			cfg:                &otelcfg.MetricsConfig{},
+			log:                slog.Default(),
+			targetMetrics:      make(map[svc.UID]*TargetMetrics),
+			pidTracker:         NewPidServiceTracker(),
+			createEventMetrics: mockEventsStore.createEventMetrics,
+			deleteEventMetrics: mockEventsStore.deleteEventMetrics,
+		}
+
+		uid := svc.UID{Name: "concurrent-service", Namespace: "default", Instance: "instance-1"}
+
+		// Simulate rapid updates to same service with different metadata
+		for i := range 5 {
+			service := svc.Attrs{
+				UID:      uid,
+				HostName: fmt.Sprintf("host-%d", i),
+			}
+
+			event := exec.ProcessEvent{
+				Type: exec.ProcessEventCreated,
+				File: &exec.FileInfo{Pid: int32(1000 + i), Service: service},
+			}
+			reporter.onProcessEvent(&event)
+		}
+
+		hostKey := attribute.Key(attr.HostName)
+		// Should end up with latest service attributes
+		finalService := reporter.targetMetrics[uid]
+		hostName, ok := finalService.resourceAttributes.Value(hostKey)
+		assert.True(t, ok)
+		assert.Equal(t, "host-4", hostName.AsString())
+
+		// Should have created 5 times and deleted 4 times (each update after first deletes previous)
+		assert.Len(t, mockEventsStore.createCalls, 5)
+		assert.Len(t, mockEventsStore.deleteCalls, 4)
+	})
+}
+
+func attrsToTargetMetrics(mr *MetricsReporter, attrs *svc.Attrs) *TargetMetrics {
+	targetMetrics := &TargetMetrics{}
+
+	targetMetrics.resourceAttributes = attribute.NewSet(mr.resourceAttrsForService(attrs)...)
+
+	targetMetrics.tracesResourceAttributes = *attribute.EmptySet()
+
+	return targetMetrics
+}
+
+func resourcesMatch(t *testing.T, one *TargetMetrics, two *TargetMetrics) {
+	assert.Equal(t, one.resourceAttributes.Len(), two.resourceAttributes.Len())
+
+	for i := 0; i < one.resourceAttributes.Len(); i++ {
+		a, ok := one.resourceAttributes.Get(i)
+		assert.True(t, ok)
+
+		other, ok := two.resourceAttributes.Value(a.Key)
+		assert.True(t, ok)
+		assert.Equal(t, a.Value.AsString(), other.AsString())
 	}
 }

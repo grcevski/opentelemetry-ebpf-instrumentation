@@ -27,8 +27,6 @@
 #include <gotracer/go_str.h>
 #include <gotracer/go_stream_key.h>
 #include <gotracer/hpack.h>
-#include <gotracer/protocol_jsonrpc.h>
-#include <gotracer/maps/jsonrpc_jump_table.h>
 
 #include <logger/bpf_dbg.h>
 
@@ -37,9 +35,7 @@
 
 #include <pid/pid_helpers.h>
 
-enum { k_tail_jsonrpc = 0 };
 static const char traceparent[] = "traceparent: ";
-static const char content_type[] = "content-type: ";
 
 typedef struct http_client_data {
     s64 content_length;
@@ -70,13 +66,11 @@ typedef struct server_http_func_invocation {
     u64 content_length;
     u64 response_length;
     u64 status;
-    u64 body_addr; // pointer to the body buffer
+    u64 rpc_request_addr; // pointer to the jsonrpc Request
     tp_info_t tp;
-    unsigned char content_type[HTTP_CONTENT_TYPE_MAX_LEN];
     u8 method[METHOD_MAX_LEN];
     u8 path[PATH_MAX_LEN];
-    u8 json_content_type;
-    u8 _pad[4];
+    u8 _pad[5];
 } server_http_func_invocation_t;
 
 struct {
@@ -98,25 +92,13 @@ static __always_inline unsigned char *temp_header_mem() {
     return bpf_map_lookup_elem(&temp_header_mem_store, &zero);
 }
 
-struct {
-    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-    __type(key, u32);
-    __type(value, unsigned char[HTTP_BODY_MAX_LEN]);
-    __uint(max_entries, 1);
-} temp_body_mem_store SEC(".maps");
-
-static __always_inline unsigned char *temp_body_mem() {
-    const u32 zero = 0;
-    return bpf_map_lookup_elem(&temp_body_mem_store, &zero);
-}
-
 /* HTTP Server */
 
 // This instrumentation attaches uprobe to the following function:
 // func (mux *ServeMux) ServeHTTP(w ResponseWriter, r *Request)
 // or other functions sharing the same signature (e.g http.Handler.ServeHTTP)
 SEC("uprobe/ServeHTTP")
-int beyla_uprobe_ServeHTTP(struct pt_regs *ctx) {
+int obi_uprobe_ServeHTTP(struct pt_regs *ctx) {
     bpf_dbg_printk("=== uprobe/ServeHTTP === ");
     void *goroutine_addr = GOROUTINE_PTR(ctx);
 
@@ -150,15 +132,6 @@ int beyla_uprobe_ServeHTTP(struct pt_regs *ctx) {
         server_trace_parent(goroutine_addr, &invocation.tp, decoded_tp);
         // TODO: if context propagation is supported, overwrite the header value in the map with the
         // new span context and the same thread id.
-
-        // get content-type from readContinuedLineSlice
-        if (header_inv && header_inv->content_type[0]) {
-            bpf_dbg_printk("Found content type in ongoing request: %s", header_inv->content_type);
-            if (is_json_content_type((void *)header_inv->content_type,
-                                     sizeof(header_inv->content_type))) {
-                invocation.json_content_type = 1;
-            }
-        }
 
         // Get method from Request.Method
         if (!read_go_str("method",
@@ -210,7 +183,7 @@ done:
 }
 
 SEC("uprobe/readRequest")
-int beyla_uprobe_readRequestStart(struct pt_regs *ctx) {
+int obi_uprobe_readRequestStart(struct pt_regs *ctx) {
     bpf_dbg_printk("=== uprobe/proc readRequest === ");
 
     void *goroutine_addr = GOROUTINE_PTR(ctx);
@@ -256,7 +229,7 @@ int beyla_uprobe_readRequestStart(struct pt_regs *ctx) {
 }
 
 SEC("uprobe/readRequest")
-int beyla_uprobe_readRequestReturns(struct pt_regs *ctx) {
+int obi_uprobe_readRequestReturns(struct pt_regs *ctx) {
     bpf_dbg_printk("=== uprobe/proc readRequest returns === ");
 
     void *goroutine_addr = GOROUTINE_PTR(ctx);
@@ -286,7 +259,7 @@ int beyla_uprobe_readRequestReturns(struct pt_regs *ctx) {
 
 // Handles finding the connection information for http2 servers in grpc
 SEC("uprobe/http2Server_processHeaders")
-int beyla_uprobe_http2Server_processHeaders(struct pt_regs *ctx) {
+int obi_uprobe_http2Server_processHeaders(struct pt_regs *ctx) {
     void *sc_ptr = GO_PARAM1(ctx);
     void *frame = GO_PARAM2(ctx);
     bpf_dbg_printk("=== uprobe/http2Server_processHeaders sc %lx === ", sc_ptr);
@@ -311,33 +284,16 @@ static __always_inline void update_traceparent(server_http_func_invocation_t *in
     bpf_dbg_printk("Found traceparent in header %s", header_start);
 }
 
-static __always_inline void update_content_type(server_http_func_invocation_t *inv,
-                                                const unsigned char *header_start) {
-    __builtin_memset(inv->content_type, 0, sizeof(inv->content_type));
-    __builtin_memcpy(inv->content_type, header_start, sizeof(inv->content_type));
-    bpf_dbg_printk("Found content-type in header %s", inv->content_type);
-}
-
 static __always_inline void handle_traceparent_header(server_http_func_invocation_t *inv,
                                                       go_addr_key_t *g_key,
                                                       unsigned char *traceparent_start) {
     if (inv) {
-        update_traceparent(inv, traceparent_start);
+        if (!valid_trace(inv->tp.trace_id)) {
+            update_traceparent(inv, traceparent_start);
+        }
     } else {
-        server_http_func_invocation_t minimal_inv = {};
+        server_http_func_invocation_t minimal_inv = {.tp = {0}};
         update_traceparent(&minimal_inv, traceparent_start);
-        bpf_map_update_elem(&ongoing_http_server_requests, g_key, &minimal_inv, BPF_ANY);
-    }
-}
-
-static __always_inline void handle_content_type_header(server_http_func_invocation_t *inv,
-                                                       go_addr_key_t *g_key,
-                                                       unsigned char *content_type_start) {
-    if (inv) {
-        update_content_type(inv, content_type_start);
-    } else {
-        server_http_func_invocation_t minimal_inv = {};
-        update_content_type(&minimal_inv, content_type_start);
         bpf_map_update_elem(&ongoing_http_server_requests, g_key, &minimal_inv, BPF_ANY);
     }
 }
@@ -352,7 +308,7 @@ static __always_inline unsigned char *match_header(
 }
 
 SEC("uprobe/readContinuedLineSlice")
-int beyla_uprobe_readContinuedLineSliceReturns(struct pt_regs *ctx) {
+int obi_uprobe_readContinuedLineSliceReturns(struct pt_regs *ctx) {
     bpf_dbg_printk("=== uprobe/proc readContinuedLineSlice returns === ");
 
     void *goroutine_addr = GOROUTINE_PTR(ctx);
@@ -375,7 +331,6 @@ int beyla_uprobe_readContinuedLineSliceReturns(struct pt_regs *ctx) {
     };
 
     const u32 w3c_value_start = sizeof(traceparent) - 1;
-    const u32 content_type_value_start = sizeof(content_type) - 1;
 
     server_http_func_invocation_t *inv = bpf_map_lookup_elem(&ongoing_http_server_requests, &g_key);
 
@@ -383,12 +338,6 @@ int beyla_uprobe_readContinuedLineSliceReturns(struct pt_regs *ctx) {
         match_header(temp, safe_len, traceparent, w3c_value_start, W3C_VAL_LENGTH);
     if (traceparent_start) {
         handle_traceparent_header(inv, &g_key, traceparent_start);
-    }
-
-    unsigned char *content_type_start = match_header(
-        temp, safe_len, content_type, content_type_value_start, HTTP_CONTENT_TYPE_MAX_LEN);
-    if (content_type_start) {
-        handle_content_type_header(inv, &g_key, content_type_start);
     }
 
     return 0;
@@ -430,7 +379,7 @@ static __always_inline int serve_http_returns(struct pt_regs *ctx) {
     make_tp_string(tp_buf, &invocation->tp);
     bpf_dbg_printk("tp: %s", tp_buf);
 
-    http_request_trace *trace = bpf_ringbuf_reserve(&events, sizeof(http_request_trace), 0);
+    http_request_trace_t *trace = bpf_ringbuf_reserve(&events, sizeof(http_request_trace_t), 0);
     if (!trace) {
         bpf_dbg_printk("can't reserve space in the ringbuffer");
         goto done;
@@ -487,7 +436,7 @@ done:
 }
 
 SEC("uprobe/ServeHTTP_ret")
-int beyla_uprobe_ServeHTTPReturns(struct pt_regs *ctx) {
+int obi_uprobe_ServeHTTPReturns(struct pt_regs *ctx) {
     return serve_http_returns(ctx);
 }
 
@@ -595,13 +544,13 @@ static __always_inline void roundTripStartHelper(struct pt_regs *ctx) {
 }
 
 SEC("uprobe/roundTrip")
-int beyla_uprobe_roundTrip(struct pt_regs *ctx) {
+int obi_uprobe_roundTrip(struct pt_regs *ctx) {
     roundTripStartHelper(ctx);
     return 0;
 }
 
 SEC("uprobe/roundTrip_return")
-int beyla_uprobe_roundTripReturn(struct pt_regs *ctx) {
+int obi_uprobe_roundTripReturn(struct pt_regs *ctx) {
     bpf_dbg_printk("=== uprobe/proc http roundTrip return === ");
 
     void *goroutine_addr = GOROUTINE_PTR(ctx);
@@ -624,7 +573,7 @@ int beyla_uprobe_roundTripReturn(struct pt_regs *ctx) {
         goto done;
     }
 
-    http_request_trace *trace = bpf_ringbuf_reserve(&events, sizeof(http_request_trace), 0);
+    http_request_trace_t *trace = bpf_ringbuf_reserve(&events, sizeof(http_request_trace_t), 0);
     if (!trace) {
         bpf_dbg_printk("can't reserve space in the ringbuffer");
         goto done;
@@ -698,7 +647,7 @@ done:
 #ifndef NO_HEADER_PROPAGATION
 // Context propagation through HTTP headers
 SEC("uprobe/header_writeSubset")
-int beyla_uprobe_writeSubset(struct pt_regs *ctx) {
+int obi_uprobe_writeSubset(struct pt_regs *ctx) {
     bpf_dbg_printk("=== uprobe/proc header writeSubset === ");
 
     void *header_addr = GO_PARAM1(ctx);
@@ -796,14 +745,14 @@ done:
 }
 #else
 SEC("uprobe/header_writeSubset")
-int beyla_uprobe_writeSubset(struct pt_regs *ctx) {
+int obi_uprobe_writeSubset(struct pt_regs *ctx) {
     return 0;
 }
 #endif
 
 // HTTP 2.0 server support
 SEC("uprobe/http2ResponseWriterStateWriteHeader")
-int beyla_uprobe_http2ResponseWriterStateWriteHeader(struct pt_regs *ctx) {
+int obi_uprobe_http2ResponseWriterStateWriteHeader(struct pt_regs *ctx) {
     bpf_dbg_printk("=== uprobe/proc (http response)/(http2 responseWriterState) writeHeader === ");
 
     void *goroutine_addr = GOROUTINE_PTR(ctx);
@@ -843,7 +792,7 @@ int beyla_uprobe_http2ResponseWriterStateWriteHeader(struct pt_regs *ctx) {
 
 // HTTP 2.0 server support
 SEC("uprobe/http2serverConn_runHandler")
-int beyla_uprobe_http2serverConn_runHandler(struct pt_regs *ctx) {
+int obi_uprobe_http2serverConn_runHandler(struct pt_regs *ctx) {
     bpf_dbg_printk("=== uprobe/proc http2serverConn_runHandler === ");
 
     void *goroutine_addr = GOROUTINE_PTR(ctx);
@@ -904,7 +853,6 @@ static __always_inline void setup_http2_client_conn(void *goroutine_addr,
                                                     void *cc_ptr,
                                                     u32 stream_id,
                                                     go_offset_const off_cc_tconn_pos,
-                                                    go_offset_const off_cc_next_stream_id_pos,
                                                     go_offset_const off_cc_framer_pos) {
     go_addr_key_t g_key = {};
     go_addr_key_from_id(&g_key, goroutine_addr);
@@ -964,7 +912,7 @@ static __always_inline void setup_http2_client_conn(void *goroutine_addr,
 }
 
 SEC("uprobe/http2RoundTrip")
-int beyla_uprobe_http2RoundTrip(struct pt_regs *ctx) {
+int obi_uprobe_http2RoundTrip(struct pt_regs *ctx) {
     bpf_dbg_printk("=== uprobe/proc http2RoundTrip === ");
     // we use the usual start helper, just like for normal http calls, but we later save
     // more context, like the streamID
@@ -976,19 +924,14 @@ int beyla_uprobe_http2RoundTrip(struct pt_regs *ctx) {
 // This runs on separate go routine called from the round tripper, but we need it
 // to establish the correct connection information and stream_id
 SEC("uprobe/http2WriteHeaders")
-int beyla_uprobe_http2WriteHeaders(struct pt_regs *ctx) {
+int obi_uprobe_http2WriteHeaders(struct pt_regs *ctx) {
     void *goroutine_addr = GOROUTINE_PTR(ctx);
     void *cc_ptr = GO_PARAM1(ctx);
     u64 stream_id = (u64)GO_PARAM2(ctx);
 
     bpf_dbg_printk("=== uprobe/proc http2WriteHeaders === ");
 
-    setup_http2_client_conn(goroutine_addr,
-                            cc_ptr,
-                            (u32)stream_id,
-                            _cc_tconn_pos,
-                            _cc_next_stream_id_pos,
-                            _cc_framer_pos);
+    setup_http2_client_conn(goroutine_addr, cc_ptr, (u32)stream_id, _cc_tconn_pos, _cc_framer_pos);
 
     return 0;
 }
@@ -997,19 +940,15 @@ int beyla_uprobe_http2WriteHeaders(struct pt_regs *ctx) {
 // to establish the correct connection information and stream_id. The Go vendored
 // version has its own offsets.
 SEC("uprobe/http2WriteHeadersVendored")
-int beyla_uprobe_http2WriteHeaders_vendored(struct pt_regs *ctx) {
+int obi_uprobe_http2WriteHeaders_vendored(struct pt_regs *ctx) {
     void *goroutine_addr = GOROUTINE_PTR(ctx);
     void *cc_ptr = GO_PARAM1(ctx);
     u64 stream_id = (u64)GO_PARAM2(ctx);
 
     bpf_dbg_printk("=== uprobe/proc http2WriteHeaders === ");
 
-    setup_http2_client_conn(goroutine_addr,
-                            cc_ptr,
-                            (u32)stream_id,
-                            _cc_tconn_vendored_pos,
-                            _cc_next_stream_id_vendored_pos,
-                            _cc_framer_vendored_pos);
+    setup_http2_client_conn(
+        goroutine_addr, cc_ptr, (u32)stream_id, _cc_tconn_vendored_pos, _cc_framer_vendored_pos);
 
     return 0;
 }
@@ -1033,7 +972,7 @@ struct {
 } framer_invocation_map SEC(".maps");
 
 SEC("uprobe/http2FramerWriteHeaders")
-int beyla_uprobe_http2FramerWriteHeaders(struct pt_regs *ctx) {
+int obi_uprobe_http2FramerWriteHeaders(struct pt_regs *ctx) {
     bpf_dbg_printk("=== uprobe/proc http2 Framer writeHeaders === ");
     void *framer = GO_PARAM1(ctx);
 
@@ -1110,7 +1049,7 @@ int beyla_uprobe_http2FramerWriteHeaders(struct pt_regs *ctx) {
 }
 #else
 SEC("uprobe/http2FramerWriteHeaders")
-int beyla_uprobe_http2FramerWriteHeaders(struct pt_regs *ctx) {
+int obi_uprobe_http2FramerWriteHeaders(struct pt_regs *ctx) {
     return 0;
 }
 #endif
@@ -1120,7 +1059,7 @@ int beyla_uprobe_http2FramerWriteHeaders(struct pt_regs *ctx) {
     66 // 1 + 1 + 8 + 1 + 55 = type byte + hpack_len_as_byte("traceparent") + strlen(hpack("traceparent")) + len_as_byte(55) + generated traceparent id
 
 SEC("uprobe/http2FramerWriteHeaders_returns")
-int beyla_uprobe_http2FramerWriteHeaders_returns(struct pt_regs *ctx) {
+int obi_uprobe_http2FramerWriteHeaders_returns(struct pt_regs *ctx) {
     bpf_dbg_printk("=== uprobe/proc http2 Framer writeHeaders returns === ");
 
     void *goroutine_addr = GOROUTINE_PTR(ctx);
@@ -1232,13 +1171,13 @@ done:
 }
 #else
 SEC("uprobe/http2FramerWriteHeaders_returns")
-int beyla_uprobe_http2FramerWriteHeaders_returns(struct pt_regs *ctx) {
+int obi_uprobe_http2FramerWriteHeaders_returns(struct pt_regs *ctx) {
     return 0;
 }
 #endif
 
 SEC("uprobe/connServe")
-int beyla_uprobe_connServe(struct pt_regs *ctx) {
+int obi_uprobe_connServe(struct pt_regs *ctx) {
     void *goroutine_addr = GOROUTINE_PTR(ctx);
     bpf_dbg_printk("=== uprobe/proc http conn serve goroutine %lx === ", goroutine_addr);
 
@@ -1252,7 +1191,7 @@ int beyla_uprobe_connServe(struct pt_regs *ctx) {
 }
 
 SEC("uprobe/netFdRead")
-int beyla_uprobe_netFdRead(struct pt_regs *ctx) {
+int obi_uprobe_netFdRead(struct pt_regs *ctx) {
     void *goroutine_addr = GOROUTINE_PTR(ctx);
     bpf_dbg_printk("=== uprobe/proc netFD read goroutine %lx === ", goroutine_addr);
 
@@ -1296,107 +1235,84 @@ int beyla_uprobe_netFdRead(struct pt_regs *ctx) {
                               &sql_conn->conn); // ok to not check the result, we leave it as 0
     }
 
-    return 0;
-}
-
-SEC("uprobe/bodyRead")
-int beyla_uprobe_bodyRead(struct pt_regs *ctx) {
-    void *goroutine_addr = GOROUTINE_PTR(ctx);
-    bpf_dbg_printk("=== uprobe/proc body read goroutine === ");
-    go_addr_key_t g_key = {};
-    go_addr_key_from_id(&g_key, goroutine_addr);
-
-    // Get the address of the slice struct (p)
-    u64 body_addr = (u64)GO_PARAM2(ctx);
-
-    server_http_func_invocation_t *invocation =
-        bpf_map_lookup_elem(&ongoing_http_server_requests, &g_key);
-    if (!invocation) {
-        return 0;
+    mongo_go_client_req_t *mongo_conn = bpf_map_lookup_elem(&ongoing_mongo_requests, &g_key);
+    bpf_dbg_printk("mongo_conn %llx", mongo_conn);
+    if (mongo_conn) {
+        void *fd_ptr = GO_PARAM1(ctx);
+        get_conn_info_from_fd(fd_ptr,
+                              &mongo_conn->conn); // ok to not check the result, we leave it as 0
     }
-    invocation->body_addr = body_addr;
 
     return 0;
 }
 
-SEC("uprobe/bodyReadRet")
-int beyla_uprobe_bodyReadReturn(struct pt_regs *ctx) {
-    bpf_dbg_printk("=== uprobe/proc body read returns goroutine === ");
+SEC("uprobe/jsonrpcReadRequestHeader")
+int obi_uprobe_jsonrpcReadRequestHeader(struct pt_regs *ctx) {
     void *goroutine_addr = GOROUTINE_PTR(ctx);
-    go_addr_key_t g_key = {};
-    go_addr_key_from_id(&g_key, goroutine_addr);
+    bpf_dbg_printk("=== uprobe/proc jsonrpc read request header goroutine %lx === ",
+                   goroutine_addr);
 
-    u64 n = (u64)GO_PARAM1(ctx);
-    bpf_dbg_printk("n is %llu", n);
-
-    server_http_func_invocation_t *invocation =
-        bpf_map_lookup_elem(&ongoing_http_server_requests, &g_key);
-    if (!invocation) {
-        return 0;
-    }
-    if (n <= 0 || !invocation->body_addr) {
-        return 0;
-    }
-    // json_content-type is set in invocation in ServeHTTP
-    if (invocation->json_content_type != 1) {
-        bpf_dbg_printk("content type is not json, skipping");
-        return 0;
-    }
-
-    unsigned char *body_buf = temp_body_mem();
-    if (!body_buf) {
-        return 0;
-    }
-
-    const u32 safe_len = n > HTTP_BODY_MAX_LEN ? HTTP_BODY_MAX_LEN : n;
-    if (!read_go_str_n("http body", (void *)invocation->body_addr, n, body_buf, safe_len)) {
-        bpf_dbg_printk("failed to read body, n=%llu, body_addr=%llx", n, invocation->body_addr);
-        return 0;
-    }
-    // bpf_dbg_printk("body is %s", body_buf);
-    bpf_tail_call(ctx, &jsonrpc_jump_table, k_tail_jsonrpc);
-    return 0;
-}
-
-//k_tail_jsonrpc
-SEC("uprobe/readJsonrpcMethod")
-int beyla_read_jsonrpc_method(struct pt_regs *ctx) {
-    bpf_dbg_printk("=== uprobe/proc read jsonrpc method === ");
-    void *goroutine_addr = GOROUTINE_PTR(ctx);
     go_addr_key_t g_key = {};
     go_addr_key_from_id(&g_key, goroutine_addr);
 
     server_http_func_invocation_t *invocation =
         bpf_map_lookup_elem(&ongoing_http_server_requests, &g_key);
     if (!invocation) {
-        bpf_dbg_printk("can't find invocation info for server call");
+        return 0;
+    }
+    const u64 rpc_request_addr = (u64)GO_PARAM2(ctx);
+    bpf_dbg_printk("rpc_request_addr %llx", rpc_request_addr);
+    invocation->rpc_request_addr = rpc_request_addr;
+
+    return 0;
+}
+
+SEC("uprobe/jsonrpcReadRequestHeaderRet")
+int obi_uprobe_jsonrpcReadRequestHeaderReturns(struct pt_regs *ctx) {
+    void *goroutine_addr = GOROUTINE_PTR(ctx);
+    bpf_dbg_printk("=== uprobe/proc jsonrpc read request header return goroutine %lx === ",
+                   goroutine_addr);
+
+    go_addr_key_t g_key = {};
+    go_addr_key_from_id(&g_key, goroutine_addr);
+
+    server_http_func_invocation_t *invocation =
+        bpf_map_lookup_elem(&ongoing_http_server_requests, &g_key);
+
+    if (!invocation || !invocation->rpc_request_addr) {
         return 0;
     }
 
-    // tail call is guaranteed to run on the same CPU as its caller
-    // so we can shared the same buffer via a per-CPU map
-    unsigned char *body_buf = temp_body_mem();
-    if (!body_buf) {
+    off_table_t *ot = get_offsets_table();
+
+    const u64 rpc_request_addr = invocation->rpc_request_addr;
+
+    bpf_dbg_printk("rpc_request_addr %llx", rpc_request_addr);
+
+    const u64 method_len = peek_go_str_len(
+        "JSON-RPC method",
+        (void *)rpc_request_addr,
+        go_offset_of(ot, (go_offset){.v = _jsonrpc_request_header_service_method_pos}));
+
+    if (method_len == 0) {
         return 0;
     }
-    if (is_jsonrpc2_body((const unsigned char *)body_buf, HTTP_BODY_MAX_LEN)) {
-        unsigned char method_buf[JSONRPC_METHOD_BUF_SIZE] = {};
-        u32 method_len = extract_jsonrpc2_method(
-            (const unsigned char *)body_buf, HTTP_BODY_MAX_LEN, method_buf, sizeof(method_buf));
-        if (method_len > 0) {
-            bpf_dbg_printk("JSON-RPC method: %s", method_buf);
-            read_go_str_n("JSON-RPC method",
-                          (void *)method_buf,
-                          method_len,
-                          invocation->method,
-                          sizeof(invocation->method));
-        }
+
+    if (!read_go_str("JSON-RPC method",
+                     (void *)rpc_request_addr,
+                     go_offset_of(ot, (go_offset){.v = _jsonrpc_request_header_service_method_pos}),
+                     invocation->method,
+                     METHOD_MAX_LEN)) {
+        bpf_dbg_printk("Failed to read JSON-RPC method from %llx", rpc_request_addr);
+        return 0;
     }
+    bpf_dbg_printk("read jsonrpc method %s", invocation->method);
+
     return 0;
 }
 
 SEC("uprobe/connServeRet")
-int beyla_uprobe_connServeRet(struct pt_regs *ctx) {
+int obi_uprobe_connServeRet(struct pt_regs *ctx) {
     bpf_dbg_printk("=== uprobe/proc http conn serve ret === ");
     void *goroutine_addr = GOROUTINE_PTR(ctx);
 
@@ -1409,7 +1325,7 @@ int beyla_uprobe_connServeRet(struct pt_regs *ctx) {
 }
 
 SEC("uprobe/persistConnRoundTrip")
-int beyla_uprobe_persistConnRoundTrip(struct pt_regs *ctx) {
+int obi_uprobe_persistConnRoundTrip(struct pt_regs *ctx) {
     bpf_dbg_printk("=== uprobe/proc http persistConn roundTrip === ");
     void *goroutine_addr = GOROUTINE_PTR(ctx);
     off_table_t *ot = get_offsets_table();

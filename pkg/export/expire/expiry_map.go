@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package expire
 
 import (
@@ -66,6 +69,11 @@ func (ex *ExpiryMap[T]) GetOrCreate(lbls []string, instancer func() T) T {
 
 // DeleteExpired entries and return their label set
 func (ex *ExpiryMap[T]) DeleteExpired() []T {
+	// If TTL is 0, disable expiration completely
+	if ex.ttl == 0 {
+		return nil
+	}
+
 	var delKeys []string
 	var delEntries []T
 	ex.mt.RLock()

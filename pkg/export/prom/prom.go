@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package prom
 
 import (
@@ -12,19 +15,21 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/app/request"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/buildinfo"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/connector"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/exec"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/pipe/global"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/svc"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes"
-	attr "github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes/names"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/expire"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/instrumentations"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/otel"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/pipe/msg"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/pipe/swarm"
+	"go.opentelemetry.io/obi/pkg/appolly/app/request"
+	"go.opentelemetry.io/obi/pkg/appolly/app/svc"
+	"go.opentelemetry.io/obi/pkg/appolly/discover/exec"
+	"go.opentelemetry.io/obi/pkg/buildinfo"
+	"go.opentelemetry.io/obi/pkg/export/attributes"
+	attr "go.opentelemetry.io/obi/pkg/export/attributes/names"
+	"go.opentelemetry.io/obi/pkg/export/connector"
+	"go.opentelemetry.io/obi/pkg/export/expire"
+	"go.opentelemetry.io/obi/pkg/export/instrumentations"
+	"go.opentelemetry.io/obi/pkg/export/otel"
+	"go.opentelemetry.io/obi/pkg/export/otel/otelcfg"
+	"go.opentelemetry.io/obi/pkg/pipe/global"
+	"go.opentelemetry.io/obi/pkg/pipe/msg"
+	"go.opentelemetry.io/obi/pkg/pipe/swarm"
+	"go.opentelemetry.io/obi/pkg/pipe/swarm/swarms"
 )
 
 // injectable function reference for testing
@@ -80,12 +85,7 @@ const (
 	sourceKey            = "source"
 	telemetryLanguageKey = "telemetry_sdk_language"
 	telemetrySDKKey      = "telemetry_sdk_name"
-
-	clientKey          = "client"
-	clientNamespaceKey = "client_service_namespace"
-	serverKey          = "server"
-	serverNamespaceKey = "server_service_namespace"
-	connectionTypeKey  = "connection_type"
+	telemetrySDKVersion  = "telemetry_sdk_version"
 
 	// default values for the histogram configuration
 	// from https://grafana.com/docs/mimir/latest/send/native-histograms/#migrate-from-classic-histograms
@@ -96,7 +96,7 @@ const (
 
 // metrics for Beyla statistics
 const (
-	BeylaBuildInfo = "beyla_build_info"
+	buildInfoSuffix = "_build_info"
 
 	LanguageLabel = "target_lang"
 )
@@ -112,7 +112,6 @@ type PrometheusConfig struct {
 	Port int    `yaml:"port" env:"OTEL_EBPF_PROMETHEUS_PORT"`
 	Path string `yaml:"path" env:"OTEL_EBPF_PROMETHEUS_PATH"`
 
-	//nolint:undoc
 	DisableBuildInfo bool `yaml:"disable_build_info" env:"OTEL_EBPF_PROMETHEUS_DISABLE_BUILD_INFO"`
 
 	// Features of metrics that are can be exported. Accepted values are "application" and "network".
@@ -120,13 +119,12 @@ type PrometheusConfig struct {
 	// Allows configuration of which instrumentations should be enabled, e.g. http, grpc, sql...
 	Instrumentations []string `yaml:"instrumentations" env:"OTEL_EBPF_PROMETHEUS_INSTRUMENTATIONS" envSeparator:","`
 
-	Buckets otel.Buckets `yaml:"buckets"`
+	Buckets otelcfg.Buckets `yaml:"buckets"`
 
 	// TTL is the time since a metric was updated for the last time until it is
 	// removed from the metrics set.
-	TTL time.Duration `yaml:"ttl" env:"OTEL_EBPF_PROMETHEUS_TTL"`
-	//nolint:undoc
-	SpanMetricsServiceCacheSize int `yaml:"service_cache_size"`
+	TTL                         time.Duration `yaml:"ttl" env:"OTEL_EBPF_PROMETHEUS_TTL"`
+	SpanMetricsServiceCacheSize int           `yaml:"service_cache_size"`
 
 	AllowServiceGraphSelfReferences bool `yaml:"allow_service_graph_self_references" env:"OTEL_EBPF_PROMETHEUS_ALLOW_SERVICE_GRAPH_SELF_REFERENCES"`
 
@@ -149,27 +147,27 @@ func (p *PrometheusConfig) AnySpanMetricsEnabled() bool {
 }
 
 func (p *PrometheusConfig) SpanMetricsSizesEnabled() bool {
-	return slices.Contains(p.Features, otel.FeatureSpanSizes)
+	return slices.Contains(p.Features, otelcfg.FeatureSpanSizes)
 }
 
 func (p *PrometheusConfig) SpanMetricsEnabled() bool {
-	return slices.Contains(p.Features, otel.FeatureSpan) || slices.Contains(p.Features, otel.FeatureSpanOTel)
+	return slices.Contains(p.Features, otelcfg.FeatureSpan) || slices.Contains(p.Features, otelcfg.FeatureSpanOTel)
 }
 
 func (p *PrometheusConfig) InvalidSpanMetricsConfig() bool {
-	return slices.Contains(p.Features, otel.FeatureSpan) && slices.Contains(p.Features, otel.FeatureSpanOTel)
+	return slices.Contains(p.Features, otelcfg.FeatureSpan) && slices.Contains(p.Features, otelcfg.FeatureSpanOTel)
 }
 
 func (p *PrometheusConfig) HostMetricsEnabled() bool {
-	return slices.Contains(p.Features, otel.FeatureApplicationHost)
+	return slices.Contains(p.Features, otelcfg.FeatureApplicationHost)
 }
 
 func (p *PrometheusConfig) OTelMetricsEnabled() bool {
-	return slices.Contains(p.Features, otel.FeatureApplication)
+	return slices.Contains(p.Features, otelcfg.FeatureApplication)
 }
 
 func (p *PrometheusConfig) ServiceGraphMetricsEnabled() bool {
-	return slices.Contains(p.Features, otel.FeatureGraph)
+	return slices.Contains(p.Features, otelcfg.FeatureGraph)
 }
 
 func (p *PrometheusConfig) NetworkMetricsEnabled() bool {
@@ -177,15 +175,15 @@ func (p *PrometheusConfig) NetworkMetricsEnabled() bool {
 }
 
 func (p *PrometheusConfig) NetworkFlowBytesEnabled() bool {
-	return slices.Contains(p.Features, otel.FeatureNetwork)
+	return slices.Contains(p.Features, otelcfg.FeatureNetwork)
 }
 
 func (p *PrometheusConfig) NetworkInterzoneMetricsEnabled() bool {
-	return slices.Contains(p.Features, otel.FeatureNetworkInterZone)
+	return slices.Contains(p.Features, otelcfg.FeatureNetworkInterZone)
 }
 
 func (p *PrometheusConfig) EBPFEnabled() bool {
-	return slices.Contains(p.Features, otel.FeatureEBPF)
+	return slices.Contains(p.Features, otelcfg.FeatureEBPF)
 }
 
 func (p *PrometheusConfig) EndpointEnabled() bool {
@@ -233,6 +231,9 @@ type metricsReporter struct {
 	attrGPUMemoryAllocs        []attributes.Field[*request.Span, string]
 	attrGPUKernelGridSize      []attributes.Field[*request.Span, string]
 	attrGPUKernelBlockSize     []attributes.Field[*request.Span, string]
+	attrGPUMemoryCopies        []attributes.Field[*request.Span, string]
+	attrSvcGraph               []attributes.Field[*request.Span, string]
+	attrDNSLookupDuration      []attributes.Field[*request.Span, string]
 
 	// trace span metrics
 	spanMetricsLatency           *Expirer[prometheus.Histogram]
@@ -253,6 +254,10 @@ type metricsReporter struct {
 	gpuMemoryAllocsTotal *Expirer[prometheus.Counter]
 	gpuKernelGridSize    *Expirer[prometheus.Histogram]
 	gpuKernelBlockSize   *Expirer[prometheus.Histogram]
+	gpuMemoryCopySize    *Expirer[prometheus.Histogram]
+
+	// dns related metrics
+	dnsLookupDuration *Expirer[prometheus.Histogram]
 
 	promConnect *connector.PrometheusManager
 
@@ -266,12 +271,17 @@ type metricsReporter struct {
 
 	serviceMap  map[svc.UID]svc.Attrs
 	pidsTracker otel.PidServiceTracker
+
+	// for testing purposes
+	createEventMetrics func(service *svc.Attrs)
+	deleteEventMetrics func(service *svc.Attrs)
 }
 
 func PrometheusEndpoint(
 	ctxInfo *global.ContextInfo,
 	cfg *PrometheusConfig,
 	selectorCfg *attributes.SelectorConfig,
+	unresolved request.UnresolvedNames,
 	input *msg.Queue[[]request.Span],
 	processEventCh *msg.Queue[exec.ProcessEvent],
 ) swarm.InstanceFunc {
@@ -279,7 +289,7 @@ func PrometheusEndpoint(
 		if !cfg.Enabled() {
 			return swarm.EmptyRunFunc()
 		}
-		reporter, err := newReporter(ctxInfo, cfg, selectorCfg, input, processEventCh)
+		reporter, err := newReporter(ctxInfo, cfg, selectorCfg, unresolved, input, processEventCh)
 		if err != nil {
 			return nil, fmt.Errorf("instantiating Prometheus endpoint: %w", err)
 		}
@@ -291,7 +301,7 @@ func PrometheusEndpoint(
 }
 
 func (p *PrometheusConfig) spanMetricsLatencyName() string {
-	if slices.Contains(p.Features, otel.FeatureSpan) {
+	if slices.Contains(p.Features, otelcfg.FeatureSpan) {
 		return SpanMetricsLatency
 	}
 
@@ -299,7 +309,7 @@ func (p *PrometheusConfig) spanMetricsLatencyName() string {
 }
 
 func (p *PrometheusConfig) spanMetricsCallsName() string {
-	if slices.Contains(p.Features, otel.FeatureSpan) {
+	if slices.Contains(p.Features, otelcfg.FeatureSpan) {
 		return SpanMetricsCalls
 	}
 
@@ -311,6 +321,7 @@ func newReporter(
 	ctxInfo *global.ContextInfo,
 	cfg *PrometheusConfig,
 	selectorCfg *attributes.SelectorConfig,
+	unresolved request.UnresolvedNames,
 	input *msg.Queue[[]request.Span],
 	processEventCh *msg.Queue[exec.ProcessEvent],
 ) (*metricsReporter, error) {
@@ -324,45 +335,47 @@ func newReporter(
 
 	is := instrumentations.NewInstrumentationSelection(cfg.Instrumentations)
 
-	var attrHTTPDuration, attrHTTPClientDuration, attrHTTPRequestSize, attrHTTPResponseSize, attrHTTPClientRequestSize, attrHTTPClientResponseSize []attributes.Field[*request.Span, string]
+	var attrHTTPDuration, attrHTTPClientDuration, attrHTTPRequestSize, attrHTTPResponseSize, attrHTTPClientRequestSize, attrHTTPClientResponseSize, attrSvcGraph []attributes.Field[*request.Span, string]
+
+	attributeGetters := request.SpanPromGetters(unresolved)
 
 	if is.HTTPEnabled() {
-		attrHTTPDuration = attributes.PrometheusGetters(request.SpanPromGetters,
+		attrHTTPDuration = attributes.PrometheusGetters(attributeGetters,
 			attrsProvider.For(attributes.HTTPServerDuration))
-		attrHTTPClientDuration = attributes.PrometheusGetters(request.SpanPromGetters,
+		attrHTTPClientDuration = attributes.PrometheusGetters(attributeGetters,
 			attrsProvider.For(attributes.HTTPClientDuration))
-		attrHTTPRequestSize = attributes.PrometheusGetters(request.SpanPromGetters,
+		attrHTTPRequestSize = attributes.PrometheusGetters(attributeGetters,
 			attrsProvider.For(attributes.HTTPServerRequestSize))
-		attrHTTPResponseSize = attributes.PrometheusGetters(request.SpanPromGetters,
+		attrHTTPResponseSize = attributes.PrometheusGetters(attributeGetters,
 			attrsProvider.For(attributes.HTTPServerResponseSize))
-		attrHTTPClientRequestSize = attributes.PrometheusGetters(request.SpanPromGetters,
+		attrHTTPClientRequestSize = attributes.PrometheusGetters(attributeGetters,
 			attrsProvider.For(attributes.HTTPClientRequestSize))
-		attrHTTPClientResponseSize = attributes.PrometheusGetters(request.SpanPromGetters,
+		attrHTTPClientResponseSize = attributes.PrometheusGetters(attributeGetters,
 			attrsProvider.For(attributes.HTTPClientResponseSize))
 	}
 
 	var attrGRPCDuration, attrGRPCClientDuration []attributes.Field[*request.Span, string]
 
 	if is.GRPCEnabled() {
-		attrGRPCDuration = attributes.PrometheusGetters(request.SpanPromGetters,
+		attrGRPCDuration = attributes.PrometheusGetters(attributeGetters,
 			attrsProvider.For(attributes.RPCServerDuration))
-		attrGRPCClientDuration = attributes.PrometheusGetters(request.SpanPromGetters,
+		attrGRPCClientDuration = attributes.PrometheusGetters(attributeGetters,
 			attrsProvider.For(attributes.RPCClientDuration))
 	}
 
 	var attrDBClientDuration []attributes.Field[*request.Span, string]
 
 	if is.DBEnabled() {
-		attrDBClientDuration = attributes.PrometheusGetters(request.SpanPromGetters,
+		attrDBClientDuration = attributes.PrometheusGetters(attributeGetters,
 			attrsProvider.For(attributes.DBClientDuration))
 	}
 
 	var attrMessagingProcessDuration, attrMessagingPublishDuration []attributes.Field[*request.Span, string]
 
 	if is.MQEnabled() {
-		attrMessagingPublishDuration = attributes.PrometheusGetters(request.SpanPromGetters,
+		attrMessagingPublishDuration = attributes.PrometheusGetters(attributeGetters,
 			attrsProvider.For(attributes.MessagingPublishDuration))
-		attrMessagingProcessDuration = attributes.PrometheusGetters(request.SpanPromGetters,
+		attrMessagingProcessDuration = attributes.PrometheusGetters(attributeGetters,
 			attrsProvider.For(attributes.MessagingProcessDuration))
 	}
 
@@ -370,16 +383,30 @@ func newReporter(
 	var attrGPUMemoryAllocations []attributes.Field[*request.Span, string]
 	var attrGPUKernelGridSize []attributes.Field[*request.Span, string]
 	var attrGPUKernelBlockSize []attributes.Field[*request.Span, string]
+	var attrGPUMemoryCopies []attributes.Field[*request.Span, string]
 
 	if is.GPUEnabled() {
-		attrGPUKernelLaunchCalls = attributes.PrometheusGetters(request.SpanPromGetters,
+		attrGPUKernelLaunchCalls = attributes.PrometheusGetters(attributeGetters,
 			attrsProvider.For(attributes.GPUKernelLaunchCalls))
-		attrGPUMemoryAllocations = attributes.PrometheusGetters(request.SpanPromGetters,
+		attrGPUMemoryAllocations = attributes.PrometheusGetters(attributeGetters,
 			attrsProvider.For(attributes.GPUMemoryAllocations))
-		attrGPUKernelGridSize = attributes.PrometheusGetters(request.SpanPromGetters,
+		attrGPUKernelGridSize = attributes.PrometheusGetters(attributeGetters,
 			attrsProvider.For(attributes.GPUKernelGridSize))
-		attrGPUKernelBlockSize = attributes.PrometheusGetters(request.SpanPromGetters,
+		attrGPUKernelBlockSize = attributes.PrometheusGetters(attributeGetters,
 			attrsProvider.For(attributes.GPUKernelBlockSize))
+		attrGPUMemoryCopies = attributes.PrometheusGetters(attributeGetters,
+			attrsProvider.For(attributes.GPUMemoryCopies))
+	}
+
+	var attrDNSLookupDuration []attributes.Field[*request.Span, string]
+
+	if is.DNSEnabled() {
+		attrDNSLookupDuration = attributes.PrometheusGetters(attributeGetters,
+			attrsProvider.For(attributes.DNSLookupDuration))
+	}
+
+	if cfg.ServiceGraphMetricsEnabled() {
+		attrSvcGraph = attributes.PrometheusGetters(attributeGetters, []attr.Name{attr.Client, attr.ClientNamespace, attr.Server, attr.ServerNamespace, attr.Source})
 	}
 
 	clock := expire.NewCachedClock(timeNow)
@@ -388,8 +415,8 @@ func newReporter(
 	// executable inspector
 	extraMetadataLabels := parseExtraMetadata(cfg.ExtraResourceLabels)
 	mr := &metricsReporter{
-		input:                      input.Subscribe(),
-		processEvents:              processEventCh.Subscribe(),
+		input:                      input.Subscribe(msg.SubscriberName("prom.InputSpans")),
+		processEvents:              processEventCh.Subscribe(msg.SubscriberName("prom.ProcessEvents")),
 		serviceMap:                 map[svc.UID]svc.Attrs{},
 		pidsTracker:                otel.NewPidServiceTracker(),
 		ctxInfo:                    ctxInfo,
@@ -413,8 +440,13 @@ func newReporter(
 		attrHTTPClientResponseSize: attrHTTPClientResponseSize,
 		attrGPUKernelCalls:         attrGPUKernelLaunchCalls,
 		attrGPUMemoryAllocs:        attrGPUMemoryAllocations,
+		attrGPUKernelGridSize:      attrGPUKernelGridSize,
+		attrGPUKernelBlockSize:     attrGPUKernelBlockSize,
+		attrGPUMemoryCopies:        attrGPUMemoryCopies,
+		attrDNSLookupDuration:      attrDNSLookupDuration,
+		attrSvcGraph:               attrSvcGraph,
 		beylaInfo: NewExpirer[prometheus.Gauge](prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: BeylaBuildInfo,
+			Name: attr.VendorPrefix + buildInfoSuffix,
 			Help: "A metric with a constant '1' value labeled by version, revision, branch, " +
 				"goversion from which Beyla was built, the goos and goarch for the build, and the" +
 				"language of the reported services",
@@ -584,7 +616,7 @@ func newReporter(
 				NativeHistogramBucketFactor:     defaultHistogramBucketFactor,
 				NativeHistogramMaxBucketNumber:  defaultHistogramMaxBucketNumber,
 				NativeHistogramMinResetDuration: defaultHistogramMinResetDuration,
-			}, labelNamesServiceGraph()).MetricVec, clock.Time, cfg.TTL)
+			}, labelNames(attrSvcGraph)).MetricVec, clock.Time, cfg.TTL)
 		}),
 		serviceGraphServer: optionalHistogramProvider(cfg.ServiceGraphMetricsEnabled(), func() *Expirer[prometheus.Histogram] {
 			return NewExpirer[prometheus.Histogram](prometheus.NewHistogramVec(prometheus.HistogramOpts{
@@ -594,19 +626,19 @@ func newReporter(
 				NativeHistogramBucketFactor:     defaultHistogramBucketFactor,
 				NativeHistogramMaxBucketNumber:  defaultHistogramMaxBucketNumber,
 				NativeHistogramMinResetDuration: defaultHistogramMinResetDuration,
-			}, labelNamesServiceGraph()).MetricVec, clock.Time, cfg.TTL)
+			}, labelNames(attrSvcGraph)).MetricVec, clock.Time, cfg.TTL)
 		}),
 		serviceGraphFailed: optionalCounterProvider(cfg.ServiceGraphMetricsEnabled(), func() *Expirer[prometheus.Counter] {
 			return NewExpirer[prometheus.Counter](prometheus.NewCounterVec(prometheus.CounterOpts{
 				Name: ServiceGraphFailed,
 				Help: "number of failed service calls in trace service graph metrics format",
-			}, labelNamesServiceGraph()).MetricVec, clock.Time, cfg.TTL)
+			}, labelNames(attrSvcGraph)).MetricVec, clock.Time, cfg.TTL)
 		}),
 		serviceGraphTotal: optionalCounterProvider(cfg.ServiceGraphMetricsEnabled(), func() *Expirer[prometheus.Counter] {
 			return NewExpirer[prometheus.Counter](prometheus.NewCounterVec(prometheus.CounterOpts{
 				Name: ServiceGraphTotal,
 				Help: "number of service calls in trace service graph metrics format",
-			}, labelNamesServiceGraph()).MetricVec, clock.Time, cfg.TTL)
+			}, labelNames(attrSvcGraph)).MetricVec, clock.Time, cfg.TTL)
 		}),
 		targetInfo: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: TargetInfo,
@@ -644,7 +676,31 @@ func newReporter(
 				NativeHistogramMinResetDuration: defaultHistogramMinResetDuration,
 			}, labelNames(attrGPUKernelBlockSize)).MetricVec, clock.Time, cfg.TTL)
 		}),
+		gpuMemoryCopySize: optionalHistogramProvider(is.GPUEnabled(), func() *Expirer[prometheus.Histogram] {
+			return NewExpirer[prometheus.Histogram](prometheus.NewHistogramVec(prometheus.HistogramOpts{
+				Name:                            attributes.GPUMemoryCopies.Prom,
+				Help:                            "amount of GPU to and from memory copies",
+				Buckets:                         cfg.Buckets.RequestSizeHistogram,
+				NativeHistogramBucketFactor:     defaultHistogramBucketFactor,
+				NativeHistogramMaxBucketNumber:  defaultHistogramMaxBucketNumber,
+				NativeHistogramMinResetDuration: defaultHistogramMinResetDuration,
+			}, labelNames(attrGPUMemoryCopies)).MetricVec, clock.Time, cfg.TTL)
+		}),
+		dnsLookupDuration: optionalHistogramProvider(is.DNSEnabled(), func() *Expirer[prometheus.Histogram] {
+			return NewExpirer[prometheus.Histogram](prometheus.NewHistogramVec(prometheus.HistogramOpts{
+				Name:                            attributes.DNSLookupDuration.Prom,
+				Help:                            "measures the time taken to perform a DNS lookup",
+				Buckets:                         cfg.Buckets.DurationHistogram,
+				NativeHistogramBucketFactor:     defaultHistogramBucketFactor,
+				NativeHistogramMaxBucketNumber:  defaultHistogramMaxBucketNumber,
+				NativeHistogramMinResetDuration: defaultHistogramMinResetDuration,
+			}, labelNames(attrDNSLookupDuration)).MetricVec, clock.Time, cfg.TTL)
+		}),
 	}
+
+	// testing aid
+	mr.deleteEventMetrics = mr.deleteTargetInfoMetrics
+	mr.createEventMetrics = mr.createTargetInfos
 
 	registeredMetrics := []prometheus.Collector{mr.targetInfo}
 
@@ -682,6 +738,10 @@ func newReporter(
 				mr.msgProcessDuration,
 				mr.msgPublishDuration,
 			)
+		}
+
+		if is.DNSEnabled() {
+			registeredMetrics = append(registeredMetrics, mr.dnsLookupDuration)
 		}
 	}
 
@@ -722,6 +782,7 @@ func newReporter(
 			mr.gpuMemoryAllocsTotal,
 			mr.gpuKernelGridSize,
 			mr.gpuKernelBlockSize,
+			mr.gpuMemoryCopySize,
 		)
 	}
 
@@ -783,22 +844,14 @@ func (r *metricsReporter) reportMetrics(ctx context.Context) {
 
 func (r *metricsReporter) collectMetrics(ctx context.Context) {
 	go r.watchForProcessEvents(ctx)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case spans, ok := <-r.input:
-			if !ok {
-				return
-			}
-			// clock needs to be updated to let the expirer
-			// remove the old metrics
-			r.clock.Update()
-			for i := range spans {
-				r.observe(&spans[i])
-			}
+	swarms.ForEachInput(ctx, r.input, nil, func(spans []request.Span) {
+		// clock needs to be updated to let the expirer
+		// remove the old metrics
+		r.clock.Update()
+		for i := range spans {
+			r.observe(&spans[i])
 		}
-	}
+	})
 }
 
 func (r *metricsReporter) otelMetricsObserved(span *request.Span) bool {
@@ -806,7 +859,7 @@ func (r *metricsReporter) otelMetricsObserved(span *request.Span) bool {
 }
 
 func (r *metricsReporter) otelSpanMetricsObserved(span *request.Span) bool {
-	return r.cfg.OTelMetricsEnabled() && !span.Service.ExportsOTelMetricsSpan()
+	return r.cfg.AnySpanMetricsEnabled() && !span.Service.ExportsOTelMetricsSpan()
 }
 
 func (r *metricsReporter) otelSpanFiltered(span *request.Span) bool {
@@ -816,6 +869,9 @@ func (r *metricsReporter) otelSpanFiltered(span *request.Span) bool {
 //nolint:cyclop
 func (r *metricsReporter) observe(span *request.Span) {
 	if r.otelSpanFiltered(span) {
+		return
+	}
+	if !span.Service.ExportModes.CanExportMetrics() {
 		return
 	}
 	t := span.Timings()
@@ -900,6 +956,18 @@ func (r *metricsReporter) observe(span *request.Span) {
 					labelValues(span, r.attrGPUMemoryAllocs)...,
 				).Metric.Add(float64(span.ContentLength))
 			}
+		case request.EventTypeGPUMemcpy:
+			if r.is.GPUEnabled() {
+				r.gpuMemoryCopySize.WithLabelValues(
+					labelValues(span, r.attrGPUMemoryCopies)...,
+				).Metric.Observe(float64(span.ContentLength))
+			}
+		case request.EventTypeDNS:
+			if r.is.DNSEnabled() {
+				r.dnsLookupDuration.WithLabelValues(
+					labelValues(span, r.attrDNSLookupDuration)...,
+				).Metric.Observe(duration)
+			}
 		}
 	}
 
@@ -918,7 +986,8 @@ func (r *metricsReporter) observe(span *request.Span) {
 
 		if r.cfg.ServiceGraphMetricsEnabled() {
 			if !span.IsSelfReferenceSpan() || r.cfg.AllowServiceGraphSelfReferences {
-				lvg := r.labelValuesServiceGraph(span)
+				lvg := labelValues(span, r.attrSvcGraph)
+
 				if span.IsClientSpan() {
 					r.serviceGraphClient.WithLabelValues(lvg...).Metric.Observe(duration)
 					// If we managed to resolve the remote name only, we check to see
@@ -980,7 +1049,7 @@ func (r *metricsReporter) labelValuesSpans(span *request.Span) []string {
 		span.ServiceGraphKind(),
 		span.Service.UID.Instance, // app instance ID
 		span.Service.Job(),
-		"beyla",
+		attr.VendorPrefix,
 	}
 }
 
@@ -994,6 +1063,7 @@ func labelNamesTargetInfo(kubeEnabled bool, extraMetadataLabelNames []attr.Name)
 		serviceJobKey,
 		telemetryLanguageKey,
 		telemetrySDKKey,
+		telemetrySDKVersion,
 		sourceKey,
 		osTypeKey,
 	}
@@ -1018,8 +1088,9 @@ func (r *metricsReporter) labelValuesTargetInfo(service *svc.Attrs) []string {
 		service.UID.Instance, // app instance ID
 		service.Job(),
 		service.SDKLanguage.String(),
-		"beyla",
-		"beyla",
+		attr.VendorPrefix,
+		buildinfo.Version,
+		attr.VendorPrefix,
 		"linux",
 	}
 
@@ -1032,29 +1103,6 @@ func (r *metricsReporter) labelValuesTargetInfo(service *svc.Attrs) []string {
 	}
 
 	return values
-}
-
-func labelNamesServiceGraph() []string {
-	return []string{clientKey, clientNamespaceKey, serverKey, serverNamespaceKey, sourceKey}
-}
-
-func (r *metricsReporter) labelValuesServiceGraph(span *request.Span) []string {
-	if span.IsClientSpan() {
-		return []string{
-			request.SpanPeer(span),
-			span.Service.UID.Namespace,
-			request.SpanHost(span),
-			span.OtherNamespace,
-			"beyla",
-		}
-	}
-	return []string{
-		request.SpanPeer(span),
-		span.OtherNamespace,
-		request.SpanHost(span),
-		span.Service.UID.Namespace,
-		"beyla",
-	}
 }
 
 func labelNames[T any](getters []attributes.Field[T, string]) []string {
@@ -1105,16 +1153,16 @@ func (r *metricsReporter) origService(uid svc.UID, service *svc.Attrs) *svc.Attr
 	return orig
 }
 
-func (r *metricsReporter) deleteTargetInfo(uid svc.UID, service *svc.Attrs) {
-	targetInfoLabelValues := r.labelValuesTargetInfo(r.origService(uid, service))
+func (r *metricsReporter) deleteTargetInfoMetric(service *svc.Attrs) {
+	targetInfoLabelValues := r.labelValuesTargetInfo(service)
 	r.targetInfo.DeleteLabelValues(targetInfoLabelValues...)
 }
 
-func (r *metricsReporter) deleteTracesTargetInfo(uid svc.UID, service *svc.Attrs) {
+func (r *metricsReporter) deleteTracesTargetInfoMetric(service *svc.Attrs) {
 	if !r.cfg.AnySpanMetricsEnabled() {
 		return
 	}
-	targetInfoLabelValues := r.labelValuesTargetInfo(r.origService(uid, service))
+	targetInfoLabelValues := r.labelValuesTargetInfo(service)
 	r.tracesTargetInfo.DeleteLabelValues(targetInfoLabelValues...)
 }
 
@@ -1126,34 +1174,68 @@ func (r *metricsReporter) disassociatePIDFromService(pid int32) (bool, svc.UID) 
 	return r.pidsTracker.RemovePID(pid)
 }
 
-func (r *metricsReporter) watchForProcessEvents(ctx context.Context) {
-	log := mlog().With("function", "watchForProcessEvents")
-	for {
-		select {
-		case pe, ok := <-r.processEvents:
-			if !ok {
-				log.Debug("process channel closed. Exiting")
-				return
-			}
-			log.Debug("Received new process event", "event type", pe.Type, "pid", pe.File.Pid, "attrs", pe.File.Service.UID)
-			uid := pe.File.Service.UID
+func (r *metricsReporter) createTargetInfos(service *svc.Attrs) {
+	r.createTargetInfo(service)
+	r.createTracesTargetInfo(service)
+}
 
-			if pe.Type == exec.ProcessEventCreated {
-				r.createTargetInfo(&pe.File.Service)
-				r.createTracesTargetInfo(&pe.File.Service)
+func (r *metricsReporter) deleteTargetInfoMetrics(service *svc.Attrs) {
+	r.deleteTargetInfoMetric(service)
+	r.deleteTracesTargetInfoMetric(service)
+}
+
+func (r *metricsReporter) deleteTargetInfos(uid svc.UID, service *svc.Attrs) {
+	r.deleteEventMetrics(r.origService(uid, service))
+}
+
+func (r *metricsReporter) handleProcessEvent(pe exec.ProcessEvent, log *slog.Logger) {
+	log.Debug("Received new process event", "event type", pe.Type, "pid", pe.File.Pid, "attrs", pe.File.Service.UID)
+	uid := pe.File.Service.UID
+
+	if pe.Type == exec.ProcessEventCreated {
+		// Handle the case when the PID changed its feathers, e.g. got new metadata impacting the service name.
+		// There's no new PID, just an update to the metadata.
+		if staleUID, exists := r.pidsTracker.TracksPID(pe.File.Pid); exists && !staleUID.Equals(&uid) {
+			log.Debug("updating older service definition", "from", staleUID, "new", uid)
+			r.pidsTracker.ReplaceUID(staleUID, uid)
+			if origAttrs, ok := r.serviceMap[staleUID]; ok {
+				log.Debug("updating service attributes for", "service", uid)
+				r.deleteEventMetrics(&origAttrs)
+				delete(r.serviceMap, staleUID)
 				r.serviceMap[uid] = pe.File.Service
-				r.setupPIDToServiceRelationship(pe.File.Pid, uid)
-			} else {
-				if deleted, origUID := r.disassociatePIDFromService(pe.File.Pid); deleted {
-					mlog().Debug("deleting infos for", "pid", pe.File.Pid, "attrs", pe.File.Service.UID)
-					r.deleteTargetInfo(origUID, &pe.File.Service)
-					r.deleteTracesTargetInfo(origUID, &pe.File.Service)
-					delete(r.serviceMap, origUID)
-				}
+				r.createEventMetrics(&pe.File.Service)
+				// we don't setup the pid again, we just replaced the metrics it's associated with
 			}
-		case <-ctx.Done():
-			log.Debug("Context done. Exiting")
 			return
 		}
+
+		// Handle the case when we have new labels for same service
+		// It could be a brand new PID with this information, so we fall through after deleting
+		// the old target info
+		if origAttrs, ok := r.serviceMap[uid]; ok {
+			log.Debug("updating stale attributes for", "service", uid)
+			r.deleteEventMetrics(&origAttrs)
+		}
+
+		r.createEventMetrics(&pe.File.Service)
+		r.serviceMap[uid] = pe.File.Service
+		r.setupPIDToServiceRelationship(pe.File.Pid, uid)
+	} else {
+		if deleted, origUID := r.disassociatePIDFromService(pe.File.Pid); deleted {
+			mlog().Debug("deleting infos for", "pid", pe.File.Pid, "attrs", pe.File.Service.UID)
+			r.deleteTargetInfos(origUID, &pe.File.Service)
+			if r.cfg.HostMetricsEnabled() && r.pidsTracker.Count() == 0 {
+				mlog().Debug("No more PIDs tracked, expiring host info metric")
+				r.tracesHostInfo.entries.DeleteAll()
+			}
+			delete(r.serviceMap, origUID)
+		}
 	}
+}
+
+func (r *metricsReporter) watchForProcessEvents(ctx context.Context) {
+	log := mlog().With("function", "watchForProcessEvents")
+	swarms.ForEachInput(ctx, r.processEvents, log.Debug, func(pe exec.ProcessEvent) {
+		r.handleProcessEvent(pe, log)
+	})
 }

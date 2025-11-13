@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 //go:build obi_bpf_ignore
 // Copyright Red Hat / IBM
 // Copyright Grafana Labs
@@ -182,7 +185,7 @@ static __always_inline bool same_ip(const u8 *ip1, const u8 *ip2) {
 }
 
 SEC("socket/filter")
-int beyla_socket__filter(struct __sk_buff *skb) {
+int obi_socket__filter(struct __sk_buff *skb) {
     // If sampling is defined, will only parse 1 out of "sampling" flows
     if (sampling != 0 && (bpf_get_prandom_u32() % sampling) != 0) {
         return TC_ACT_UNSPEC;

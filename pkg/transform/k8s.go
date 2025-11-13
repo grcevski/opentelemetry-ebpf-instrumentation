@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package transform
 
 import (
@@ -5,18 +8,26 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"sync"
 	"time"
 
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/app/request"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/exec"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/kube"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/pipe/global"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/svc"
-	attr "github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes/names"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/kubeflags"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/pipe/msg"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/pipe/swarm"
+	"go.opentelemetry.io/obi/pkg/appolly/app/request"
+	"go.opentelemetry.io/obi/pkg/appolly/app/svc"
+	"go.opentelemetry.io/obi/pkg/appolly/discover/exec"
+	attr "go.opentelemetry.io/obi/pkg/export/attributes/names"
+	"go.opentelemetry.io/obi/pkg/internal/helpers/container"
+	maps2 "go.opentelemetry.io/obi/pkg/internal/helpers/maps"
+	ikube "go.opentelemetry.io/obi/pkg/internal/kube"
+	"go.opentelemetry.io/obi/pkg/kube"
+	"go.opentelemetry.io/obi/pkg/kube/kubecache/informer"
+	"go.opentelemetry.io/obi/pkg/kube/kubeflags"
+	"go.opentelemetry.io/obi/pkg/pipe/global"
+	"go.opentelemetry.io/obi/pkg/pipe/msg"
+	"go.opentelemetry.io/obi/pkg/pipe/swarm"
+	"go.opentelemetry.io/obi/pkg/pipe/swarm/swarms"
 )
+
+var containerInfoForPID = container.InfoForPID
 
 func klog() *slog.Logger {
 	return slog.With("component", "transform.KubernetesDecorator")
@@ -27,7 +38,6 @@ type KubernetesDecorator struct {
 
 	// ClusterName overrides cluster name. If empty, the NetO11y module will try to retrieve
 	// it from the Cloud Provider Metadata (EC2, GCP and Azure), and leave it empty if it fails to.
-	//nolint:undoc
 	ClusterName string `yaml:"cluster_name" env:"OTEL_EBPF_KUBE_CLUSTER_NAME"`
 
 	// KubeconfigPath is optional. If unset, it will look in the usual location.
@@ -40,7 +50,6 @@ type KubernetesDecorator struct {
 
 	// DropExternal will drop, in NetO11y component, any flow where the source or destination
 	// IPs are not matched to any kubernetes entity, assuming they are cluster-external
-	//nolint:undoc
 	DropExternal bool `yaml:"drop_external" env:"OTEL_EBPF_NETWORK_DROP_EXTERNAL"`
 
 	// DisableInformers allows selectively disabling some informers. Accepted value is a list
@@ -51,7 +60,6 @@ type KubernetesDecorator struct {
 	DisableInformers []string `yaml:"disable_informers" env:"OTEL_EBPF_KUBE_DISABLE_INFORMERS"`
 
 	// MetaCacheAddress is the host:port address of the beyla-k8s-cache service instance
-	//nolint:undoc
 	MetaCacheAddress string `yaml:"meta_cache_address" env:"OTEL_EBPF_KUBE_META_CACHE_ADDRESS"`
 
 	// MetaRestrictLocalNode will download only the metadata from the Pods that are located in the same
@@ -64,7 +72,6 @@ type KubernetesDecorator struct {
 	MetaSourceLabels kube.MetaSourceLabels `yaml:"meta_source_labels"`
 
 	// ResourceLabels allows Beyla overriding the OTEL Resource attributes from a map of user-defined labels.
-	//nolint:undoc
 	ResourceLabels kube.ResourceLabels `yaml:"resource_labels"`
 
 	// ServiceNameTemplate allows to override the service.name with a custom value. Uses the go template language.
@@ -93,7 +100,7 @@ func KubeDecoratorProvider(
 		decorator := &metadataDecorator{
 			db:          metaStore,
 			clusterName: KubeClusterName(ctx, cfg, ctxInfo.K8sInformer),
-			input:       input.Subscribe(),
+			input:       input.Subscribe(msg.SubscriberName("transform.KubeDecorator")),
 			output:      output,
 		}
 		return decorator.nodeLoop, nil
@@ -113,12 +120,18 @@ func KubeProcessEventDecoratorProvider(
 		if err != nil {
 			return nil, fmt.Errorf("initializing KubeDecoratorProvider: %w", err)
 		}
+
 		decorator := &procEventMetadataDecorator{
+			log:         slog.With("component", "transform.KubeProcessEventDecoratorProvider"),
 			db:          metaStore,
 			clusterName: KubeClusterName(ctx, cfg, ctxInfo.K8sInformer),
-			input:       input.Subscribe(),
+			input:       input.Subscribe(msg.SubscriberName("transform.KubeProcessEventDecorator")),
 			output:      output,
+			podsInfoCh:  make(chan Event[*informer.ObjectMeta]),
+			tracker:     newPidContainerTracker(),
 		}
+
+		decorator.log.Debug("starting KubeDecoratorProvider")
 		return decorator.k8sLoop, nil
 	}
 }
@@ -130,56 +143,16 @@ type metadataDecorator struct {
 	output      *msg.Queue[[]request.Span]
 }
 
-type procEventMetadataDecorator struct {
-	db          *kube.Store
-	clusterName string
-	input       <-chan exec.ProcessEvent
-	output      *msg.Queue[exec.ProcessEvent]
-}
-
-func (md *metadataDecorator) nodeLoop(_ context.Context) {
+func (md *metadataDecorator) nodeLoop(ctx context.Context) {
 	// output channel must be closed so later stages in the pipeline can finish in cascade
 	defer md.output.Close()
-	klog().Debug("starting kubernetes span decoration loop")
-	for spans := range md.input {
+	swarms.ForEachInput(ctx, md.input, klog().Debug, func(spans []request.Span) {
 		// in-place decoration and forwarding
 		for i := range spans {
 			md.do(&spans[i])
 		}
 		md.output.Send(spans)
-	}
-	klog().Debug("stopping kubernetes span decoration loop")
-}
-
-func (md *procEventMetadataDecorator) k8sLoop(ctx context.Context) {
-	// output channel must be closed so later stages in the pipeline can finish in cascade
-	defer md.output.Close()
-
-	log := klog()
-	log.Debug("starting kubernetes process event decoration loop")
-mainLoop:
-	for {
-		select {
-		case <-ctx.Done():
-			break mainLoop
-		case pe, ok := <-md.input:
-			if !ok {
-				break mainLoop
-			}
-			log.Debug("annotating process event", "event", pe)
-
-			if podMeta, containerName := md.db.PodContainerByPIDNs(pe.File.Ns); podMeta != nil {
-				AppendKubeMetadata(md.db, &pe.File.Service, podMeta, md.clusterName, containerName)
-			} else {
-				// do not leave the service attributes map as nil
-				pe.File.Service.Metadata = map[attr.Name]string{}
-			}
-
-			// in-place decoration and forwarding
-			md.output.Send(pe)
-		}
-	}
-	log.Debug("stopping kubernetes process event decoration loop")
+	})
 }
 
 func (md *metadataDecorator) do(span *request.Span) {
@@ -190,24 +163,207 @@ func (md *metadataDecorator) do(span *request.Span) {
 		span.Service.Metadata = map[attr.Name]string{}
 	}
 	// override the peer and host names from Kubernetes metadata, if found
-	if name, _ := md.db.ServiceNameNamespaceForIP(span.Host); name != "" {
-		span.HostName = name
+	if span.Host != "" {
+		if name, _ := md.db.ServiceNameNamespaceForIP(span.Host); name != "" {
+			span.HostName = name
+		}
 	}
-	if name, _ := md.db.ServiceNameNamespaceForIP(span.Peer); name != "" {
-		span.PeerName = name
+	if span.Peer != "" {
+		if name, _ := md.db.ServiceNameNamespaceForIP(span.Peer); name != "" {
+			span.PeerName = name
+		}
+	}
+}
+
+type PodEventType int
+
+const (
+	EventCreated = PodEventType(iota)
+	EventDeleted
+	EventInstanceDeleted
+)
+
+type Event[T any] struct {
+	Type PodEventType
+	Obj  T
+}
+
+type procEventMetadataDecorator struct {
+	log         *slog.Logger
+	db          *kube.Store
+	clusterName string
+	input       <-chan exec.ProcessEvent
+	output      *msg.Queue[exec.ProcessEvent]
+	podsInfoCh  chan Event[*informer.ObjectMeta]
+	tracker     *pidContainerTracker
+}
+
+type pidContainerTracker struct {
+	missedPods    maps2.Map2[string, int32, *exec.ProcessEvent]
+	missedPodsMux sync.Mutex
+	missedPodPids map[int32]string
+}
+
+func newPidContainerTracker() *pidContainerTracker {
+	return &pidContainerTracker{
+		missedPods:    maps2.Map2[string, int32, *exec.ProcessEvent]{},
+		missedPodsMux: sync.Mutex{},
+		missedPodPids: map[int32]string{},
+	}
+}
+
+func (t *pidContainerTracker) track(containerID string, pe *exec.ProcessEvent) {
+	if pe == nil {
+		return
+	}
+	t.missedPodsMux.Lock()
+	defer t.missedPodsMux.Unlock()
+	t.missedPods.Put(containerID, pe.File.Pid, pe)
+	t.missedPodPids[pe.File.Pid] = containerID
+}
+
+func (t *pidContainerTracker) remove(pid int32) {
+	t.missedPodsMux.Lock()
+	defer t.missedPodsMux.Unlock()
+	if containerID, ok := t.missedPodPids[pid]; ok {
+		t.missedPods.Delete(containerID, pid)
+	}
+	delete(t.missedPodPids, pid)
+}
+
+func (t *pidContainerTracker) removeAll(containerID string) {
+	t.missedPodsMux.Lock()
+	defer t.missedPodsMux.Unlock()
+
+	if pids, exists := t.missedPods[containerID]; exists {
+		for pid := range pids {
+			delete(t.missedPodPids, pid)
+		}
+	}
+
+	t.missedPods.DeleteAll(containerID)
+}
+
+func (t *pidContainerTracker) info(containerID string) (map[int32]*exec.ProcessEvent, bool) {
+	t.missedPodsMux.Lock()
+	defer t.missedPodsMux.Unlock()
+
+	m, ok := t.missedPods[containerID]
+
+	return m, ok
+}
+
+func (md *procEventMetadataDecorator) ID() string { return "unique-proc-event-metadata-decorator-id" }
+
+func (md *procEventMetadataDecorator) On(event *informer.Event) error {
+	// ignoring updates on non-pod resources
+	if event.Resource == nil || event.GetResource().GetPod() == nil {
+		return nil
+	}
+	switch event.Type {
+	case informer.EventType_CREATED, informer.EventType_UPDATED:
+		md.podsInfoCh <- Event[*informer.ObjectMeta]{Type: EventCreated, Obj: event.Resource}
+	case informer.EventType_DELETED:
+		md.podsInfoCh <- Event[*informer.ObjectMeta]{Type: EventDeleted, Obj: event.Resource}
+	}
+	return nil
+}
+
+func (md *procEventMetadataDecorator) k8sLoop(ctx context.Context) {
+	// output channel must be closed so later stages in the pipeline can finish in cascade
+	defer md.output.Close()
+
+	md.log.Debug("starting kubernetes process event decoration loop")
+	go md.db.Subscribe(md)
+
+mainLoop:
+	for {
+		select {
+		case <-ctx.Done():
+			break mainLoop
+		case pe, ok := <-md.input:
+			if !ok {
+				break mainLoop
+			}
+			md.log.Debug("annotating process event", "event", pe)
+
+			if podMeta, containerName := md.db.PodContainerByPIDNs(pe.File.Ns); podMeta != nil {
+				AppendKubeMetadata(md.db, &pe.File.Service, podMeta, md.clusterName, containerName)
+			} else {
+				// do not leave the service attributes map as nil
+				pe.File.Service.Metadata = map[attr.Name]string{}
+
+				md.log.Debug("no metadata for event", "event", pe)
+
+				if pe.Type == exec.ProcessEventCreated {
+					if containerInfo, err := md.getContainerInfo(pe.File.Pid); err == nil {
+						md.log.Debug("storing pid info", "pid", pe.File.Pid, "containerId", containerInfo.ContainerID)
+						md.tracker.track(containerInfo.ContainerID, &pe)
+					}
+				} else {
+					md.tracker.remove(pe.File.Pid)
+				}
+			}
+
+			// in-place decoration and forwarding
+			md.output.Send(pe)
+		case podEvent := <-md.podsInfoCh:
+			switch podEvent.Type {
+			case EventCreated:
+				md.log.Debug("created pod event", "event", podEvent.Obj)
+				md.handlePodUpdateEvent(podEvent.Obj)
+			case EventDeleted:
+				md.cleanupPodData(podEvent.Obj)
+				md.log.Debug("deleted pod event", "event", podEvent.Obj)
+			}
+		}
+	}
+
+	md.log.Debug("stopping kubernetes process event decoration loop")
+}
+
+func (md *procEventMetadataDecorator) getContainerInfo(pid int32) (container.Info, error) {
+	cntInfo, err := containerInfoForPID(uint32(pid))
+	if err != nil {
+		return container.Info{}, err
+	}
+	return cntInfo, nil
+}
+
+func (md *procEventMetadataDecorator) handlePodUpdateEvent(pod *informer.ObjectMeta) {
+	for _, cnt := range pod.Pod.Containers {
+		md.log.Debug("looking up running process for pod container", "container", cnt.Id)
+		if peMap, ok := md.tracker.info(cnt.Id); ok {
+			md.log.Debug("found missed pid info", "containerId", cnt.Id)
+			for _, pe := range peMap {
+				if podMeta, containerName := md.db.PodContainerByPIDNs(pe.File.Ns); podMeta != nil {
+					md.log.Debug("resubmitting process event", "event", pe)
+					AppendKubeMetadata(md.db, &pe.File.Service, podMeta, md.clusterName, containerName)
+					md.output.Send(*pe)
+				}
+			}
+			md.tracker.removeAll(cnt.Id)
+		}
+	}
+}
+
+func (md *procEventMetadataDecorator) cleanupPodData(pod *informer.ObjectMeta) {
+	for _, cnt := range pod.Pod.Containers {
+		md.log.Debug("deleting info for pod container", "container", cnt.Id)
+		md.tracker.removeAll(cnt.Id)
 	}
 }
 
 // AppendKubeMetadata populates some metadata values in the passed svc.Attrs.
 // This method should be invoked by any entity willing to follow a common policy for
 // setting metadata attributes. For example this metadataDecorator or the survey informer
-func AppendKubeMetadata(db *kube.Store, svc *svc.Attrs, meta *kube.CachedObjMeta, clusterName, containerName string) {
+func AppendKubeMetadata(db *kube.Store, svc *svc.Attrs, meta *ikube.CachedObjMeta, clusterName, containerName string) {
 	if meta.Meta.Pod == nil {
 		// if this message happen, there is a bug
 		klog().Debug("pod metadata for is nil. Ignoring decoration", "meta", meta)
 		return
 	}
-	topOwner := kube.TopOwner(meta.Meta.Pod)
+	topOwner := ikube.TopOwner(meta.Meta.Pod)
 	name, namespace := db.ServiceNameNamespaceForMetadata(meta.Meta, containerName)
 	// If the user has not defined criteria values for the reported
 	// service name and namespace, we will automatically set it from

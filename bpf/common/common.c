@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 //go:build obi_bpf_ignore
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,11 +17,13 @@
 #include <common/common.h>
 
 // Force emitting struct http_request_trace into the ELF for automatic creation of Golang struct
-const http_request_trace *unused_4 __attribute__((unused));
-const sql_request_trace *unused_3 __attribute__((unused));
+const http_request_trace_t *unused_4 __attribute__((unused));
+const sql_request_trace_t *unused_3 __attribute__((unused));
 const tcp_req_t *unused_5 __attribute__((unused));
 const kafka_client_req_t *unused_6 __attribute__((unused));
 const redis_client_req_t *unused_7 __attribute__((unused));
 const kafka_go_req_t *unused_8 __attribute__((unused));
 const tcp_large_buffer_t *unused_9 __attribute__((unused));
 const otel_span_t *unused_10 __attribute__((unused));
+const mongo_go_client_req_t *unused_11 __attribute__((unused));
+const dns_req_t *unused_12 __attribute__((unused));

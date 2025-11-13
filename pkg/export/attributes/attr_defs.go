@@ -1,9 +1,12 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package attributes
 
 import (
 	"maps"
 
-	attr "github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes/names"
+	attr "go.opentelemetry.io/obi/pkg/export/attributes/names"
 )
 
 // AttrGroups will let enabling by default some groups of attributes under
@@ -80,7 +83,7 @@ func getDefinitions(
 		nil,
 		map[attr.Name]Default{
 			attr.Direction:      true,
-			attr.BeylaIP:        false,
+			attr.OBIIP:          false,
 			attr.Transport:      false,
 			attr.SrcAddress:     false,
 			attr.DstAddres:      false,
@@ -226,15 +229,16 @@ func getDefinitions(
 		map[attr.Name]Default{
 			attr.MessagingSystem:      true,
 			attr.MessagingDestination: true,
+			attr.ServerAddr:           true,
 		},
 		extraGroupAttributes[GroupMessaging],
 	)
 
 	return map[Section]AttrReportGroup{
-		BeylaNetworkFlow.Section: {
+		NetworkFlow.Section: {
 			SubGroups: []*AttrReportGroup{&networkAttributes, &networkCIDR, &networkKubeAttributes},
 		},
-		BeylaNetworkInterZone.Section: {
+		NetworkInterZone.Section: {
 			SubGroups: []*AttrReportGroup{&networkInterZone, &networkInterZoneCIDR, &networkInterZoneKube},
 		},
 		HTTPServerDuration.Section: {
@@ -274,6 +278,7 @@ func getDefinitions(
 		DBClientDuration.Section: {
 			SubGroups: []*AttrReportGroup{&appAttributes, &appKubeAttributes},
 			Attributes: map[attr.Name]Default{
+				attr.ServerAddr:   true,
 				attr.DBOperation:  true,
 				attr.DBSystemName: true,
 				attr.ErrorType:    true,
@@ -312,10 +317,23 @@ func getDefinitions(
 			SubGroups:  []*AttrReportGroup{&appAttributes, &appKubeAttributes},
 			Attributes: map[attr.Name]Default{},
 		},
+		GPUMemoryCopies.Section: {
+			SubGroups: []*AttrReportGroup{&appAttributes, &appKubeAttributes},
+			Attributes: map[attr.Name]Default{
+				attr.CudaMemcpyKind: true,
+			},
+		},
+		DNSLookupDuration.Section: {
+			SubGroups: []*AttrReportGroup{&appAttributes, &appKubeAttributes},
+			Attributes: map[attr.Name]Default{
+				attr.DNSQuestionName: true,
+				attr.ErrorType:       true,
+			},
+		},
 		// span and service graph metrics don't yet implement attribute selection,
 		// but their values can still be filtered, so we list them here just to
 		// make the filter recognize its attributes
-		// TODO: when service graph and spam metrics implement attribute selection, replace this section by proper metric names
+		// TODO: when service graph and span metrics implement attribute selection, replace this section by proper metric names
 		"---- temporary placeholder for span and service graph metrics ----": {
 			Attributes: map[attr.Name]Default{
 				attr.Client:            false,

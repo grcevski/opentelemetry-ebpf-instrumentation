@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package config
 
 import (
@@ -106,6 +109,21 @@ config:
 			name:     "YAML with no replacements",
 			input:    []byte("key: value\n"),
 			expected: []byte("key: value\n"),
+		},
+		{
+			name:     "YAML with Kubernetes $(VAR) syntax",
+			input:    []byte("key: $(TEST_VAR)\n"),
+			expected: []byte("key: test_value\n"),
+		},
+		{
+			name:     "YAML with Kubernetes $(VAR) syntax with default",
+			input:    []byte("key: $(NON_EXISTENT_VAR:-default)\n"),
+			expected: []byte("key: default\n"),
+		},
+		{
+			name:     "YAML with mixed ${VAR} and $(VAR) syntax",
+			input:    []byte("key1: ${TEST_VAR}\nkey2: $(ANOTHER_VAR)\n"),
+			expected: []byte("key1: test_value\nkey2: another_value\n"),
 		},
 	}
 

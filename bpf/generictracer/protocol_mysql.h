@@ -1,21 +1,27 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 
 #include <bpfcore/vmlinux.h>
 #include <bpfcore/bpf_helpers.h>
+#include <bpfcore/utils.h>
 
 #include <common/common.h>
 #include <common/connection_info.h>
+#include <common/large_buffers.h>
 #include <common/http_types.h>
 #include <common/pin_internal.h>
 #include <common/ringbuf.h>
 #include <common/runtime.h>
-#include <common/scratch_mem.h>
 #include <common/sql.h>
 #include <common/tp_info.h>
 #include <common/trace_common.h>
 
 #include <generictracer/protocol_common.h>
 #include <generictracer/k_tracer_tailcall.h>
+
+#include <generictracer/maps/protocol_cache.h>
 
 #include <maps/active_ssl_connections.h>
 
@@ -51,9 +57,8 @@ enum {
     k_mysql_com_stmt_prepare = 0x16,
     k_mysql_com_stmt_execute = 0x17,
 
-    // Large buffer
-    k_large_buf_max_size = 1 << 14, // 16K
-    k_large_buf_max_size_mask = k_large_buf_max_size - 1,
+    // Sanity checks
+    k_mysql_payload_length_max = 1 << 13, // 8K
 };
 
 struct {
@@ -63,8 +68,12 @@ struct {
     __uint(max_entries, MAX_CONCURRENT_REQUESTS);
 } mysql_state SEC(".maps");
 
-SCRATCH_MEM_SIZED(mysql_large_buffers, k_large_buf_max_size);
-
+// This function is used to store the MySQL header if it comes in split packets
+// from double send.
+// Given the fact that we need to store this for the duration of the full request
+// (split in potentially multiple packets), we will **not** process or preserve
+// any actual payloads that are exactly 4 bytes long — they are intentionally
+// dropped in favor of state storage.
 static __always_inline int mysql_store_state_data(const connection_info_t *conn_info,
                                                   const unsigned char *data,
                                                   size_t data_len) {
@@ -72,36 +81,37 @@ static __always_inline int mysql_store_state_data(const connection_info_t *conn_
         return 0;
     }
 
-    struct mysql_state_data *state_data = bpf_map_lookup_elem(&mysql_state, conn_info);
-    if (state_data == NULL) {
-        // State data not found, treat this data as a header.
-        struct mysql_state_data new_state_data = {};
-        bpf_probe_read(&new_state_data, k_mysql_hdr_without_command_size, (const void *)data);
-        bpf_map_update_elem(&mysql_state, conn_info, &new_state_data, BPF_ANY);
-        return -1;
-    }
+    struct mysql_state_data new_state_data = {};
+    bpf_probe_read(&new_state_data, k_mysql_hdr_without_command_size, (const void *)data);
+    bpf_map_update_elem(&mysql_state, conn_info, &new_state_data, BPF_ANY);
 
-    // This is a payload.
-    return 0;
+    return -1;
 }
 
 static __always_inline int mysql_parse_fixup_header(const connection_info_t *conn_info,
                                                     struct mysql_hdr *hdr,
                                                     const unsigned char *data,
                                                     size_t data_len) {
+    // Try to parse and validate the header first.
+    bpf_probe_read(hdr, k_mysql_hdr_size, (const void *)data);
+    if (mysql_payload_length(hdr->payload_length) ==
+        (data_len - k_mysql_hdr_without_command_size)) {
+        // Header is valid and we have the full data, we can proceed.
+        hdr->hdr_arrived = false;
+        return 0;
+    }
+
+    // Prepend the header from state data.
     struct mysql_state_data *state_data = bpf_map_lookup_elem(&mysql_state, conn_info);
     if (state_data != NULL) {
         __builtin_memcpy(hdr, state_data, k_mysql_hdr_without_command_size);
         bpf_probe_read(&hdr->command_id, k_mysql_hdr_command_id_size, (const void *)data);
         hdr->hdr_arrived = true;
-    } else {
-        if (data_len < k_mysql_hdr_size) {
-            bpf_dbg_printk("mysql_parse_fixup_header: data_len is too short: %d", data_len);
-            return -1;
-        }
-        bpf_probe_read(hdr, k_mysql_hdr_size, (const void *)data);
+        return 0;
     }
-    return 0;
+
+    bpf_dbg_printk("mysql_parse_fixup_header: failed to parse mysql header");
+    return -1;
 }
 
 // This is an alternative version of mysql_parse_fixup_header that fills the buffer
@@ -112,8 +122,6 @@ static __always_inline int mysql_read_fixup_buffer(const connection_info_t *conn
                                                    const unsigned char *data,
                                                    u32 data_len) {
     u8 offset = 0;
-    const u8 buf_len_mask =
-        mysql_buffer_size - 1; // mysql_buffer_size is guaranteed to be a power of 2
 
     struct mysql_state_data *state_data = bpf_map_lookup_elem(&mysql_state, conn_info);
     if (state_data != NULL) {
@@ -133,48 +141,52 @@ static __always_inline int mysql_read_fixup_buffer(const connection_info_t *conn
         bpf_dbg_printk("WARN: mysql_read_fixup_buffer: buffer is full, truncating data");
     }
 
-    bpf_probe_read(buf + offset, *buf_len & buf_len_mask, (const void *)data);
+    bpf_probe_read(buf + offset, *buf_len & k_large_buf_payload_max_size_mask, (const void *)data);
 
     return *buf_len;
 }
 
-static __always_inline void mysql_send_large_buffer(tcp_req_t *req,
-                                                    pid_connection_info_t *pid_conn,
-                                                    const void *u_buf,
-                                                    u32 bytes_len,
-                                                    u8 direction) {
+// Emit a large buffer event for MySQL protocol.
+// The return value is used to control the flow for this specific protocol.
+// -1: wait additional data; 0: continue, regardless of errors.
+static __always_inline int mysql_send_large_buffer(tcp_req_t *req,
+                                                   pid_connection_info_t *pid_conn,
+                                                   const void *u_buf,
+                                                   u32 bytes_len,
+                                                   u8 packet_type,
+                                                   u8 direction,
+                                                   enum large_buf_action action) {
     if (mysql_store_state_data(&pid_conn->conn, u_buf, bytes_len) < 0) {
         bpf_dbg_printk("mysql_send_large_buffer: 4 bytes packet, storing state data");
-        return;
-    }
-
-    if (bytes_len < (k_mysql_hdr_size + 1)) {
-        bpf_dbg_printk("mysql_send_large_buffer: bytes_len is too short: %d", bytes_len);
-        return;
+        return -1;
     }
 
     tcp_large_buffer_t *large_buf = (tcp_large_buffer_t *)mysql_large_buffers_mem();
     if (!large_buf) {
         bpf_dbg_printk("mysql_send_large_buffer: failed to reserve space for MySQL large buffer");
-        return;
+        return 0;
     }
 
     large_buf->type = EVENT_TCP_LARGE_BUFFER;
+    large_buf->packet_type = packet_type;
+    large_buf->action = action;
     large_buf->direction = direction;
-    __builtin_memcpy((void *)&large_buf->tp, (void *)&req->tp, sizeof(tp_info_t));
+    large_buf->conn_info = pid_conn->conn;
+    large_buf->tp = req->tp;
 
     int written =
         mysql_read_fixup_buffer(&pid_conn->conn, large_buf->buf, &large_buf->len, u_buf, bytes_len);
     if (written < 0) {
         bpf_dbg_printk("mysql_send_large_buffer: failed to read buffer, not sending large buffer");
-        return;
+        return 0;
     }
 
+    u32 total_size = sizeof(tcp_large_buffer_t);
+    total_size += written > sizeof(void *) ? written : sizeof(void *);
+
     req->has_large_buffers = true;
-    bpf_ringbuf_output(&events,
-                       large_buf,
-                       (sizeof(tcp_large_buffer_t) + written) & k_large_buf_max_size_mask,
-                       get_flags());
+    bpf_ringbuf_output(&events, large_buf, total_size & k_large_buf_max_size_mask, get_flags());
+    return 0;
 }
 
 static __always_inline u32 data_offset(struct mysql_hdr *hdr) {
@@ -186,44 +198,17 @@ static __always_inline u32 mysql_command_offset(struct mysql_hdr *hdr) {
     return data_offset(hdr) - k_mysql_hdr_command_id_size;
 }
 
-// k_tail_protocol_mysql
-SEC("kprobe/mysql")
-int beyla_protocol_mysql(void *ctx) {
-    call_protocol_args_t *args = protocol_args();
-    if (!args) {
-        return 0;
-    }
-
-    bpf_dbg_printk("=== tcp_mysql_event len=%d pid=%d ===",
-                   args->bytes_len,
-                   pid_from_pid_tgid(bpf_get_current_pid_tgid()));
-
-    if (mysql_store_state_data(
-            &args->pid_conn.conn, (const unsigned char *)args->u_buf, args->bytes_len) < 0) {
-        bpf_dbg_printk("mysql: 4 bytes packet, storing state data");
-        return 0;
-    }
-
-    // Tail call back into generic TCP handler.
-    // Once the header is fixed up, we can use the generic TCP handling code
-    // in order to reuse all the common logic.
-    bpf_tail_call(ctx, &jump_table, k_tail_protocol_tcp);
-
-    return 0;
-}
-
 static __always_inline u8 is_mysql(connection_info_t *conn_info,
                                    const unsigned char *data,
                                    u32 data_len,
-                                   u8 *packet_type,
                                    enum protocol_type *protocol_type) {
-    if (mysql_store_state_data(conn_info, data, (size_t)data_len) < 0) {
-        bpf_dbg_printk("is_mysql: 4 bytes packet, storing state data");
+    if (*protocol_type != k_protocol_type_mysql && *protocol_type != k_protocol_type_unknown) {
+        // Already classified, not mysql.
         return 0;
     }
 
-    if (data_len < (k_mysql_hdr_size + 1)) {
-        bpf_dbg_printk("is_mysql: data_len is too short: %d", data_len);
+    if (mysql_store_state_data(conn_info, data, (size_t)data_len) < 0) {
+        bpf_dbg_printk("is_mysql: 4 bytes packet, storing state data");
         return 0;
     }
 
@@ -232,15 +217,21 @@ static __always_inline u8 is_mysql(connection_info_t *conn_info,
         bpf_dbg_printk("is_mysql: failed to parse mysql header");
         return 0;
     }
+    const u32 payload_len = mysql_payload_length(hdr.payload_length);
+
+    if (payload_len > k_mysql_payload_length_max) {
+        bpf_dbg_printk("is_mysql: payload length is too large: %d", payload_len);
+        return 0;
+    }
 
     bpf_dbg_printk("is_mysql: payload_length=%d sequence_id=%d command_id=%d",
-                   mysql_payload_length(hdr.payload_length),
+                   payload_len,
                    hdr.sequence_id,
                    hdr.command_id);
 
     switch (hdr.command_id) {
     case k_mysql_com_query:
-        //case k_mysql_com_stmt_prepare:
+    case k_mysql_com_stmt_prepare:
         // COM_QUERY packet structure:
         // +------------+-------------+------------------+
         // | payload_len| sequence_id | command_id | SQL |
@@ -258,7 +249,6 @@ static __always_inline u8 is_mysql(connection_info_t *conn_info,
                 "is_mysql: COM_QUERY or COM_PREPARE found, but buf doesn't contain a sql query");
             return 0;
         }
-        *packet_type = PACKET_TYPE_REQUEST;
         break;
     case k_mysql_com_stmt_execute:
         // COM_STMT_EXECUTE packet structure:
@@ -271,9 +261,9 @@ static __always_inline u8 is_mysql(connection_info_t *conn_info,
             // Already identified, mark this as a request.
             // NOTE: Trying to classify the connection based on this command
             // would be unreliable, as the check is too shallow.
-            *packet_type = PACKET_TYPE_REQUEST;
+            break;
         }
-        break;
+        return 0;
     default:
         if (*protocol_type == k_protocol_type_mysql) {
             // Check sequence ID and make sure we are processing a response.
@@ -281,7 +271,6 @@ static __always_inline u8 is_mysql(connection_info_t *conn_info,
             // If the request came in split packets, the sequence ID will be 2 (hdr->hdr_arrived == false) or 3 (hdr->hdr_arrived == true).
             bpf_dbg_printk("is_mysql: already identified as MySQL protocol");
             if ((hdr.sequence_id == 1 && !hdr.hdr_arrived) || hdr.sequence_id > 1) {
-                *packet_type = PACKET_TYPE_RESPONSE;
                 break;
             }
             bpf_dbg_printk(
@@ -294,6 +283,8 @@ static __always_inline u8 is_mysql(connection_info_t *conn_info,
     }
 
     *protocol_type = k_protocol_type_mysql;
-    bpf_dbg_printk("is_mysql: mysql! command_id=%d packet_type=%d", hdr.command_id, *packet_type);
+    bpf_map_update_elem(&protocol_cache, conn_info, protocol_type, BPF_ANY);
+
+    bpf_dbg_printk("is_mysql: mysql! command_id=%d", hdr.command_id);
     return 1;
 }

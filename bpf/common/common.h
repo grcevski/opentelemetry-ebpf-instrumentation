@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -31,6 +34,7 @@
 #define SQL_MAX_LEN 500
 #define KAFKA_MAX_LEN 256
 #define REDIS_MAX_LEN 256
+#define MONGO_MAX_LEN 256
 #define MAX_TOPIC_NAME_LEN 64
 #define HOST_MAX_LEN 100
 #define SCHEME_MAX_LEN 10
@@ -38,13 +42,13 @@
 #define HTTP_HEADER_MAX_LEN 100
 #define HTTP_CONTENT_TYPE_MAX_LEN 16
 
-volatile const u32 mysql_buffer_size = 0;
+enum large_buf_action : u8 {
+    k_large_buf_action_init = 0,
+    k_large_buf_action_append = 1,
+};
 
 enum {
-    k_mysql_query_max = 8192,
-    k_mysql_query_max_mask = k_mysql_query_max - 1,
-    k_mysql_error_message_max = 512,
-    k_mysql_error_message_max_mask = k_mysql_error_message_max - 1
+    k_dns_max_len = 512, // must be a power of 2
 };
 
 #define MAX_SPAN_NAME_LEN 64
@@ -52,8 +56,7 @@ enum {
 
 // Trace of an HTTP call invocation. It is instantiated by the return uprobe and forwarded to the
 // user space through the events ringbuffer.
-// TODO(matt): fix naming
-typedef struct http_request_trace_t {
+typedef struct http_request_trace {
     u8 type; // Must be first
     u8 _pad0[1];
     u16 status;
@@ -70,10 +73,9 @@ typedef struct http_request_trace_t {
     tp_info_t tp;
     connection_info_t conn;
     pid_info pid;
-} http_request_trace;
+} http_request_trace_t;
 
-// TODO(matt): fix naming
-typedef struct sql_request_trace_t {
+typedef struct sql_request_trace {
     u8 type; // Must be first
     u8 _pad[1];
     u16 status;
@@ -83,7 +85,7 @@ typedef struct sql_request_trace_t {
     tp_info_t tp;
     connection_info_t conn;
     unsigned char sql[SQL_MAX_LEN];
-} sql_request_trace;
+} sql_request_trace_t;
 
 typedef struct kafka_client_req {
     u8 type; // Must be first
@@ -146,9 +148,12 @@ typedef struct tcp_req {
 
 typedef struct tcp_large_buffer {
     u8 type; // Must be first
+    u8 packet_type;
+    enum large_buf_action action;
     u8 direction;
-    u8 _pad[2];
     u32 len;
+    connection_info_t conn_info;
+    u32 _pad2;
     tp_info_t tp;
     u8 buf[];
 } tcp_large_buffer_t;
@@ -193,18 +198,18 @@ typedef struct go_otel_key_value {
 
 #define OTEL_ATTRIBUTE_KEY_MAX_LEN (32)
 #define OTEL_ATTRIBUTE_VALUE_MAX_LEN (128)
-#define OTEL_ATTRUBUTE_MAX_COUNT (16)
+#define OTEL_ATTRIBUTE_MAX_COUNT (16)
 
-typedef struct otel_attirbute {
+typedef struct otel_attribute {
     u16 val_length;
     u8 vtype;
     u8 reserved;
     unsigned char key[OTEL_ATTRIBUTE_KEY_MAX_LEN];
     unsigned char value[OTEL_ATTRIBUTE_VALUE_MAX_LEN];
-} otel_attirbute_t;
+} otel_attribute_t;
 
 typedef struct otel_attributes {
-    otel_attirbute_t attrs[OTEL_ATTRUBUTE_MAX_COUNT];
+    otel_attribute_t attrs[OTEL_ATTRIBUTE_MAX_COUNT];
     u8 valid_attrs;
     u8 _apad;
 } otel_attributes_t;
@@ -224,3 +229,33 @@ typedef struct otel_span {
     otel_attributes_t span_attrs;
     u8 _epad[6];
 } otel_span_t;
+
+typedef struct mongo_go_client_req {
+    u8 type; // Must be first
+    u8 err;
+    u8 _pad[6];
+    u64 start_monotime_ns;
+    u64 end_monotime_ns;
+    pid_info pid;
+    unsigned char op[32];
+    unsigned char db[32];
+    unsigned char coll[32];
+    connection_info_t conn;
+    tp_info_t tp;
+} mongo_go_client_req_t;
+
+typedef struct dns_req {
+    u8 flags; // Must be first we use it to tell what kind of packet we have on the ring buffer
+    u8 dns_q;
+    u8 _pad1[2];
+    u32 len;
+    connection_info_t conn;
+    u16 id;
+    u8 _pad2[2];
+    tp_info_t tp;
+    // we need this to filter traces from unsolicited processes that share the executable
+    // with other instrumented processes
+    pid_info pid;
+    unsigned char buf[k_dns_max_len];
+    u8 _pad3[4];
+} dns_req_t;

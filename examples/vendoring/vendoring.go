@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package main
 
 import (
@@ -8,11 +11,11 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/app/request"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/instrumenter"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/obi"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/pipe/msg"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/services"
+	"go.opentelemetry.io/obi/pkg/appolly/app/request"
+	"go.opentelemetry.io/obi/pkg/appolly/services"
+	"go.opentelemetry.io/obi/pkg/instrumenter"
+	"go.opentelemetry.io/obi/pkg/obi"
+	"go.opentelemetry.io/obi/pkg/pipe/msg"
 )
 
 // OpenTelemetry-eBPF-instumentation is also designed to be vendored inside other components
@@ -35,7 +38,8 @@ func main() {
 	// the instrumenter creates internally some communication Queues, but we can override some of them
 	// for inspection. In this case, we override the exporter queue to connect our own exporter
 	// (If other exporters are defined in the config, like OTEL or Prometheus, they will use this queue also)
-	exportedSpans := msg.NewQueue[[]request.Span](msg.ChannelBufferLen(config.ChannelBufferLen))
+	exportedSpans := msg.NewQueue[[]request.Span](
+		msg.ChannelBufferLen(config.ChannelBufferLen), msg.Name("exportedSpans"))
 
 	// running 2 goroutines:
 	// - one containing the vendored instrumentation

@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 //go:build obi_bpf_ignore
 #include <bpfcore/vmlinux.h>
 #include <bpfcore/bpf_helpers.h>
@@ -25,7 +28,7 @@ struct {
 } watch_events SEC(".maps");
 
 SEC("kprobe/sys_bind")
-int beyla_kprobe_sys_bind(struct pt_regs *ctx) {
+int obi_kprobe_sys_bind(struct pt_regs *ctx) {
     // unwrap the args because it's a sys call
     struct pt_regs *__ctx = (struct pt_regs *)PT_REGS_PARM1(ctx);
     void *addr;

@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 //go:build obi_bpf_ignore
 #include <bpfcore/vmlinux.h>
 #include <bpfcore/bpf_helpers.h>
@@ -26,7 +29,7 @@ enum protocol { protocol_ip4, protocol_ip6, protocol_unknown };
 char __license[] SEC("license") = "Dual MIT/GPL";
 
 SEC("tc_ingress")
-int beyla_app_ingress(struct __sk_buff *skb) {
+int obi_app_ingress(struct __sk_buff *skb) {
     //bpf_printk("ingress");
 
     protocol_info_t tcp = {};
@@ -72,22 +75,19 @@ static __always_inline void update_outgoing_request_span_id(pid_connection_info_
     }
 }
 
-static __always_inline void encode_data_in_ip_options(struct __sk_buff *skb,
-                                                      connection_info_t *conn,
-                                                      protocol_info_t *tcp,
-                                                      tp_info_pid_t *tp,
-                                                      const egress_key_t *e_key) {
+static __always_inline void
+encode_data_in_ip_options(struct __sk_buff *skb, protocol_info_t *tcp, tp_info_pid_t *tp) {
     // Handling IPv4
     // We only do this if the IP header doesn't have any options, this can be improved if needed
     if (tcp->h_proto == ETH_P_IP && tcp->ip_len == MIN_IP_LEN) {
         bpf_dbg_printk("Adding the trace_id in the IP Options");
 
-        inject_tc_ip_options_ipv4(skb, conn, tcp, tp);
+        inject_tc_ip_options_ipv4(skb, tcp, tp);
         tp->valid = 0;
     } else if (tcp->h_proto == ETH_P_IPV6 && tcp->l4_proto == IPPROTO_TCP) { // Handling IPv6
         bpf_dbg_printk("Found IPv6 header");
 
-        inject_tc_ip_options_ipv6(skb, conn, tcp, tp);
+        inject_tc_ip_options_ipv6(skb, tcp, tp);
         tp->valid = 0;
     }
 }
@@ -210,7 +210,7 @@ static __always_inline void track_sock(struct __sk_buff *skb, const connection_i
 }
 
 SEC("tc_egress")
-int beyla_app_egress(struct __sk_buff *skb) {
+int obi_app_egress(struct __sk_buff *skb) {
     //bpf_printk("egress");
     protocol_info_t tcp = {};
     connection_info_t conn = {};
@@ -253,7 +253,7 @@ int beyla_app_egress(struct __sk_buff *skb) {
     bpf_dbg_printk("egress flags %x, sequence %x, valid %d", tcp.flags, tcp.seq, tp->valid);
     dbg_print_http_connection_info(&conn);
 
-    // If it's the fist packet of an request:
+    // If it's the first packet of a request:
     // We set the span information to match our TCP information. This
     // is done for L4 context propagation, where we use the SEQ/ACK
     // numbers for the Span ID. Since this is the first time we see
@@ -274,7 +274,7 @@ int beyla_app_egress(struct __sk_buff *skb) {
     // does it only once. If it successfully injected the information it
     // will set valid to 0 so that we only run the L7 part from now on.
     if (tp->valid) {
-        encode_data_in_ip_options(skb, &conn, &tcp, tp, &e_key);
+        encode_data_in_ip_options(skb, &tcp, tp);
     }
 
     return TC_ACT_UNSPEC;

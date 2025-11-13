@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package instrumentations
 
 type InstrumentationSelection uint64
@@ -11,6 +14,10 @@ const (
 	InstrumentationKafka = "kafka"
 	InstrumentationGPU   = "gpu"
 	InstrumentationMongo = "mongo"
+	InstrumentationDNS   = "dns"
+	// Traces export selectively enables only some instrumentations by
+	// default. If you add a new instrumentation type, make sure you
+	// update the TracesConfig accordingly. Metrics do ALL == "*".
 )
 
 const (
@@ -22,6 +29,7 @@ const (
 	flagKafka
 	flagGPU
 	flagMongo
+	flagDNS
 )
 
 func strToFlag(str string) InstrumentationSelection {
@@ -42,6 +50,8 @@ func strToFlag(str string) InstrumentationSelection {
 		return flagGPU
 	case InstrumentationMongo:
 		return flagMongo
+	case InstrumentationDNS:
+		return flagDNS
 	}
 	return 0
 }
@@ -89,4 +99,8 @@ func (s InstrumentationSelection) GPUEnabled() bool {
 
 func (s InstrumentationSelection) MongoEnabled() bool {
 	return s&flagMongo != 0
+}
+
+func (s InstrumentationSelection) DNSEnabled() bool {
+	return s&flagDNS != 0
 }

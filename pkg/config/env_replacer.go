@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package config
 
 import (
@@ -6,7 +9,7 @@ import (
 	"regexp"
 )
 
-var envVarRegex = regexp.MustCompile(`\$?\${(?:env:)?([a-zA-Z_][a-zA-Z0-9_]*)(?::-([^}]*))?}`)
+var envVarRegex = regexp.MustCompile(`\$?\$[\{\(](?:env:)?([a-zA-Z_][a-zA-Z0-9_]*)(?::-([^}\)]*))?[\}\)]`)
 
 func ReplaceEnv(content []byte) []byte {
 	// Process normal environment variable substitutions

@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package attributes
 
 import (
@@ -6,7 +9,7 @@ import (
 	"slices"
 	"strings"
 
-	attr "github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes/names"
+	attr "go.opentelemetry.io/obi/pkg/export/attributes/names"
 )
 
 // Selection specifies which attributes are allowed for each metric.
@@ -62,6 +65,7 @@ func (incl Selection) Normalize() {
 	if incl == nil {
 		return
 	}
+
 	normalized := map[Section]InclusionLists{}
 	for metricName, allowedAttrs := range incl {
 		normalized[normalizeMetric(metricName)] = allowedAttrs
@@ -79,6 +83,7 @@ func (incl Selection) Matching(metricName Name) []InclusionLists {
 	if incl == nil {
 		return nil
 	}
+
 	var matchingMetricGlobs []Section
 	for glob := range incl {
 		if ok, _ := path.Match(string(glob), string(metricName.Section)); ok {

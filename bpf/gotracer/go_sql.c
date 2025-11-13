@@ -44,7 +44,7 @@ static __always_inline void set_sql_info(void *goroutine_addr, void *sql_param, 
 }
 
 SEC("uprobe/queryDC")
-int beyla_uprobe_queryDC(struct pt_regs *ctx) {
+int obi_uprobe_queryDC(struct pt_regs *ctx) {
     bpf_dbg_printk("=== uprobe/queryDC === ");
     void *goroutine_addr = GOROUTINE_PTR(ctx);
     bpf_dbg_printk("goroutine_addr %lx", goroutine_addr);
@@ -57,7 +57,7 @@ int beyla_uprobe_queryDC(struct pt_regs *ctx) {
 }
 
 SEC("uprobe/execDC")
-int beyla_uprobe_execDC(struct pt_regs *ctx) {
+int obi_uprobe_execDC(struct pt_regs *ctx) {
     bpf_dbg_printk("=== uprobe/execDC === ");
     void *goroutine_addr = GOROUTINE_PTR(ctx);
     bpf_dbg_printk("goroutine_addr %lx", goroutine_addr);
@@ -69,7 +69,7 @@ int beyla_uprobe_execDC(struct pt_regs *ctx) {
 }
 
 SEC("uprobe/queryDC")
-int beyla_uprobe_queryReturn(struct pt_regs *ctx) {
+int obi_uprobe_queryReturn(struct pt_regs *ctx) {
 
     bpf_dbg_printk("=== uprobe/query return === ");
     void *goroutine_addr = GOROUTINE_PTR(ctx);
@@ -84,7 +84,7 @@ int beyla_uprobe_queryReturn(struct pt_regs *ctx) {
     }
     bpf_map_delete_elem(&ongoing_sql_queries, &g_key);
 
-    sql_request_trace *trace = bpf_ringbuf_reserve(&events, sizeof(sql_request_trace), 0);
+    sql_request_trace_t *trace = bpf_ringbuf_reserve(&events, sizeof(sql_request_trace_t), 0);
     if (trace) {
         task_pid(&trace->pid);
         trace->type = EVENT_SQL_CLIENT;

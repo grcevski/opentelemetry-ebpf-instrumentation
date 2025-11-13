@@ -13,7 +13,7 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	sdkmetricdata "go.opentelemetry.io/otel/sdk/metric/metricdata"
 
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/otel/metric/global"
+	"go.opentelemetry.io/obi/pkg/export/otel/metric/global"
 )
 
 // ManualReader is a simple Reader that allows an application to
@@ -130,7 +130,7 @@ func (mr *ManualReader) Collect(ctx context.Context, rm *sdkmetricdata.ResourceM
 }
 
 // MarshalLog returns logging data about the ManualReader.
-func (mr *ManualReader) MarshalLog() interface{} {
+func (mr *ManualReader) MarshalLog() any {
 	mr.mu.Lock()
 	down := mr.isShutdown
 	mr.mu.Unlock()

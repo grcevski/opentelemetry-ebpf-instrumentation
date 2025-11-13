@@ -19,10 +19,10 @@ import (
 	sdkmetricdata "go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.opentelemetry.io/otel/sdk/resource"
 
-	internal "github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/otel/metric/components"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/otel/metric/components/aggregate"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/otel/metric/components/x"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/otel/metric/global"
+	internal "go.opentelemetry.io/obi/pkg/export/otel/metric/components"
+	"go.opentelemetry.io/obi/pkg/export/otel/metric/components/aggregate"
+	"go.opentelemetry.io/obi/pkg/export/otel/metric/components/x"
+	"go.opentelemetry.io/obi/pkg/export/otel/metric/global"
 )
 
 var (
@@ -390,7 +390,7 @@ func (i *inserter[N]) logConflict(id instID) {
 	}
 
 	const msg = "duplicate metric stream definitions"
-	args := []interface{}{
+	args := []any{
 		"names", fmt.Sprintf("%q, %q", existing.Name, id.Name),
 		"descriptions", fmt.Sprintf("%q, %q", existing.Description, id.Description),
 		"kinds", fmt.Sprintf("%s, %s", existing.Kind, id.Kind),

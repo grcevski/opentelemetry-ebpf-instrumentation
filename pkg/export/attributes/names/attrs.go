@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 // Package attr contains definition of the attribute names of for the metrics, especially
 // for the metrics whose reported attributes are selected in the attributes.select YAML option
 package attr
@@ -47,11 +50,19 @@ const (
 	ErrorType              = Name("error.type")
 	RPCMethod              = Name(semconv.RPCMethodKey)
 	RPCSystem              = Name(semconv.RPCSystemKey)
+	RPCService             = Name(semconv.RPCServiceKey)
 	RPCGRPCStatusCode      = Name(semconv.RPCGRPCStatusCodeKey)
 	HTTPRoute              = Name(semconv.HTTPRouteKey)
+	MessagingOpName        = Name("messaging.operation.name")
 	MessagingOpType        = Name("messaging.operation.type")
+	MessagingMessageID     = Name(semconv.MessagingMessageIDKey)
 	MessagingSystem        = Name(semconv.MessagingSystemKey)
 	MessagingDestination   = Name(semconv.MessagingDestinationNameKey)
+	GraphQLDocument        = Name(semconv.GraphqlDocumentKey)
+	GraphQLOperationName   = Name(semconv.GraphqlOperationNameKey)
+	GraphQLOperationType   = Name(semconv.GraphqlOperationTypeKey)
+	DNSAnswers             = Name("dns.answers")
+	ErrorMessage           = Name("error.message")
 
 	K8sNamespaceName   = Name("k8s.namespace.name")
 	K8sPodName         = Name("k8s.pod.name")
@@ -69,9 +80,18 @@ const (
 	K8sKind            = Name("k8s.kind")
 )
 
-// Beyla-specific network attributes
+// OBI-specific network attributes
+// obi.-prefixed attributes are a var instead of a constant to allow overriding the prefix
+// from components that vendor OBI as a library
+
+// VendorPrefix allows identifying some metrics (network, internal counters...)
+// as custom metrics, since at the moment they don't follow any semantic convention for them.
+// This value can be overridden when OBI is vendored as a library (e.g. from the OTEL collector)
+var VendorPrefix = "obi"
+
+var OBIIP = Name("obi.ip")
+
 const (
-	BeylaIP    = Name("beyla.ip")
 	Transport  = Name("transport")
 	SrcAddress = Name("src.address")
 	DstAddres  = Name("dst.address")
@@ -109,7 +129,7 @@ const (
 	K8sDstNodeName  = Name("k8s.dst.node.name")
 )
 
-// other beyla-specific attributes
+// other OBI-specific attributes
 const (
 	// Instance and Job are only explicitly used in the Prometheus
 	// exporter, as the OpenTelemetry SDK already sets them implicitly.
@@ -130,6 +150,9 @@ const (
 
 	ServiceInstanceID = Name(semconv.ServiceInstanceIDKey)
 	SkipSpanMetrics   = Name("span.metrics.skip")
+
+	VendorVersionSuffix  = Name(".version")
+	VendorRevisionSuffix = Name(".revision")
 )
 
 // traces related attributes
@@ -138,10 +161,33 @@ const (
 	DBQueryText          = Name("db.query.text")
 	DBResponseStatusCode = Name("db.response.status_code")
 	DBNamespace          = Name("db.namespace")
+
+	// Messaging
+	MessagingPartition   = Name("messaging.destination.partition.id")
+	MessagingKafkaOffset = Name("messaging.kafka.offset")
+
+	// Elasticsearch
+	ElasticsearchNodeName = Name("elasticsearch.node.name")
+
+	// AWS
+	AWSRequestID         = Name("aws.request_id")
+	AWSExtendedRequestID = Name("aws.extended_request_id")
+	AWSS3Bucket          = Name("aws.s3.bucket")
+	AWSS3Key             = Name("aws.s3.key")
+	AWSSQSQueueURL       = Name("aws.sqs.queue_url")
+
+	// Cloud
+	CloudRegion = Name(semconv.CloudRegionKey)
 )
 
 // Beyla specific GPU events
 const (
 	// GPU/Cuda related attributes
 	CudaKernelName = Name("cuda.kernel.name")
+	CudaMemcpyKind = Name("cuda.memcpy.kind")
+)
+
+// DNS events
+const (
+	DNSQuestionName = Name("dns.question.name")
 )

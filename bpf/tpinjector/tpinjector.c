@@ -1,8 +1,14 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 #include <bpfcore/vmlinux.h>
 #include <bpfcore/bpf_helpers.h>
 #include <bpfcore/bpf_endian.h>
 
+#include <common/common.h>
+#include <common/http_buf_size.h>
 #include <common/http_types.h>
+#include <common/msg_buffer.h>
 #include <common/send_args.h>
 #include <common/ssl_helpers.h>
 #include <common/tc_common.h>
@@ -10,9 +16,14 @@
 #include <common/trace_util.h>
 #include <common/tracing.h>
 
+#include <generictracer/protocol_http.h>
+#include <generictracer/protocol_tcp.h>
+#include <generictracer/protocol_http2.h>
+
 #include <logger/bpf_dbg.h>
 
 #include <maps/msg_buffers.h>
+#include <maps/ongoing_http.h>
 #include <maps/sock_dir.h>
 
 #include <tpinjector/maps/egress_key_mem.h>
@@ -115,7 +126,7 @@ static __always_inline void bpf_sock_ops_establish_cb(struct bpf_sock_ops *skops
 // Tracks all outgoing sockets (BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB)
 // We don't track incoming, those would be BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB
 SEC("sockops")
-int beyla_sockmap_tracker(struct bpf_sock_ops *skops) {
+int obi_sockmap_tracker(struct bpf_sock_ops *skops) {
     switch (skops->op) {
     case BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB:
         bpf_sock_ops_establish_cb(skops);
@@ -152,11 +163,16 @@ static __always_inline void set_tp_info_pid(const egress_key_t *e_key, const tp_
 }
 
 static __always_inline void clear_tp_info_pid(const egress_key_t *e_key) {
-    bpf_map_delete_elem(&outgoing_trace_map, &e_key);
+    bpf_map_delete_elem(&outgoing_trace_map, e_key);
 }
 
 static __always_inline u8 is_tracked_go_request(const tp_info_pid_t *tp) {
     return tp != NULL && tp->valid;
+}
+
+static __always_inline u8 already_tracked(const pid_connection_info_t *p_conn) {
+    return already_tracked_http(p_conn) || already_tracked_tcp(p_conn) ||
+           already_tracked_http2(p_conn);
 }
 
 // This code is copied from the kprobe on tcp_sendmsg and it's called from
@@ -169,25 +185,37 @@ static __always_inline u8 is_tracked_go_request(const tp_info_pid_t *tp) {
 // limit when we eventually add HTTP2/gRPC support.
 static __always_inline u8 protocol_detector(struct sk_msg_md *msg,
                                             u64 id,
-                                            const connection_info_t *conn) {
+                                            const connection_info_t *conn,
+                                            const egress_key_t *e_key) {
     bpf_dbg_printk("=== [protocol detector] %d size %d===", id, msg->size);
 
-    send_args_t s_args = {.size = msg->size};
-    __builtin_memcpy(&s_args.p_conn.conn, conn, sizeof(connection_info_t));
+    pid_connection_info_t p_conn = {};
+    __builtin_memcpy(&p_conn.conn, conn, sizeof(connection_info_t));
 
-    dbg_print_http_connection_info(&s_args.p_conn.conn);
-    sort_connection_info(&s_args.p_conn.conn);
-    s_args.p_conn.pid = pid_from_pid_tgid(id);
+    dbg_print_http_connection_info(&p_conn.conn);
+    sort_connection_info(&p_conn.conn);
+    p_conn.pid = pid_from_pid_tgid(id);
 
-    if (s_args.size == 0 || is_ssl_connection(&s_args.p_conn)) {
+    if (msg->size == 0 || is_ssl_connection(&p_conn)) {
         return 0;
     }
 
     msg_buffer_t msg_buf = {
         .pos = 0,
+        .real_size = msg->size > k_msg_buffer_size_max ? k_msg_buffer_size_max : msg->size,
+        .cpu_id = bpf_get_smp_processor_id(),
     };
 
-    bpf_probe_read_kernel(msg_buf.buf, MAX_PROTOCOL_BUF_SIZE, msg->data);
+    bpf_probe_read_kernel(msg_buf.fallback_buf, k_kprobes_http2_buf_size, msg->data);
+    u16 copy_bytes =
+        msg_buf.real_size > k_kprobes_http2_buf_size ? msg_buf.real_size : k_kprobes_http2_buf_size;
+    unsigned char **msg_ptr = bpf_map_lookup_elem(&msg_buffer_mem, &(u32){0});
+    if (!msg_ptr) {
+        bpf_d_printk("protocol_detector: failed to reserve msg_buffer space");
+        return 0;
+    }
+    bpf_probe_read_kernel(msg_ptr, copy_bytes & k_msg_buffer_size_max_mask, msg->data);
+    bpf_map_update_elem(&msg_buffer_mem, &(u32){0}, msg_ptr, BPF_ANY);
 
     // We setup any call that looks like HTTP request to be extended.
     // This must match exactly to what the decision will be for
@@ -195,14 +223,20 @@ static __always_inline u8 protocol_detector(struct sk_msg_md *msg,
     // outgoing_trace_map data used by Traffic Control to write the
     // actual 'Traceparent:...' string.
 
-    const egress_key_t e_key = make_key(conn);
-
-    if (bpf_map_update_elem(&msg_buffers, &e_key, &msg_buf, BPF_ANY)) {
+    if (bpf_map_update_elem(&msg_buffers, e_key, &msg_buf, BPF_ANY)) {
         // fail if we can't setup a msg buffer
         return 0;
     }
 
-    if (is_http_request_buf((const unsigned char *)msg_buf.buf)) {
+    // We should check if we have already seen this request and we've
+    // started tracking it. We only want to extend the first packet that
+    // looks like HTTP, not something that's passing HTTP in the body.
+    if (already_tracked(&p_conn)) {
+        bpf_dbg_printk("already extended before, ignoring this packet...");
+        return 0;
+    }
+
+    if (is_http_request_buf((const unsigned char *)msg_ptr)) {
         bpf_dbg_printk("Setting up request to be extended");
 
         return 1;
@@ -295,7 +329,7 @@ make_tp_string_skb(unsigned char *buf, const tp_info_t *tp, const unsigned char 
     *buf++ = '\r';
     *buf++ = '\n';
 
-    bpf_dbg_printk("beyla_packet_extender: %s", tp_string);
+    bpf_dbg_printk("obi_packet_extender: %s", tp_string);
 }
 
 static __always_inline bool
@@ -303,7 +337,7 @@ extend_and_write_tp(struct sk_msg_md *msg, u32 offset, const tp_info_t *tp) {
     const long err = bpf_msg_push_data(msg, offset, EXTEND_SIZE, 0);
 
     if (err != 0) {
-        bpf_dbg_printk("failed to push data: %d", err);
+        bpf_d_printk("failed to push data: %d", err);
         return false;
     }
 
@@ -312,14 +346,14 @@ extend_and_write_tp(struct sk_msg_md *msg, u32 offset, const tp_info_t *tp) {
         "offset to split %d, available: %u, size %u", offset, msg->data_end - msg->data, msg->size);
 
     if (!msg->data) {
-        bpf_dbg_printk("null data");
+        bpf_d_printk("null data");
         return false;
     }
 
     unsigned char *ptr = msg->data + offset;
 
     if ((void *)ptr + EXTEND_SIZE >= msg->data_end) {
-        bpf_dbg_printk("not enough space");
+        bpf_d_printk("not enough space");
         return false;
     }
 
@@ -394,7 +428,7 @@ write_go_traceparent(struct sk_msg_md *msg, const egress_key_t *e_key, tp_info_p
     if (tp_pid->written) {
         clear_tp_info_pid(e_key);
     } else {
-        bpf_dbg_printk("failed to write go traceparent");
+        bpf_d_printk("failed to write go traceparent");
     }
 }
 
@@ -409,7 +443,7 @@ static __always_inline bool handle_go_request(struct sk_msg_md *msg,
 
     // We have metadata setup by the Go uprobes telling us we should extend
     // this packet
-    if (!protocol_detector(msg, id, conn)) {
+    if (!protocol_detector(msg, id, conn, e_key)) {
         bpf_dbg_printk("found TLS or non HTTP go request, ignoring...");
         return false;
     }
@@ -423,7 +457,7 @@ static __always_inline bool handle_go_request(struct sk_msg_md *msg,
 // the 'Traceparent' string. It extends the HTTP header and writes the
 // Traceparent string.
 SEC("sk_msg")
-int beyla_packet_extender(struct sk_msg_md *msg) {
+int obi_packet_extender(struct sk_msg_md *msg) {
     const u64 id = bpf_get_current_pid_tgid();
     const connection_info_t conn = get_connection_info(msg);
     const egress_key_t e_key = make_key(&conn);
@@ -434,7 +468,7 @@ int beyla_packet_extender(struct sk_msg_md *msg) {
         return SK_PASS;
     }
 
-    // Valid PID only works for kprobes since  Go programs don't add their
+    // Valid PID only works for kprobes since Go programs don't add their
     // PIDs to the PID map (we instrument the binaries), handled in the
     // previous check
     if (!valid_pid(id)) {
@@ -452,7 +486,7 @@ int beyla_packet_extender(struct sk_msg_md *msg) {
 
     // We must run the protocol detector always, the outgoing trace map
     // might be setup for TCP traffic for L4 propagation.
-    const u8 tracked = protocol_detector(msg, id, &conn);
+    const u8 tracked = protocol_detector(msg, id, &conn, &e_key);
 
     if (!tracked || msg->size <= MIN_HTTP_SIZE) {
         return SK_PASS;
@@ -481,14 +515,14 @@ int beyla_packet_extender(struct sk_msg_md *msg) {
 
     bpf_tail_call(msg, &extender_jump_table, k_tail_write_msg_traceparent);
 
-    bpf_dbg_printk("tailcall failed");
+    bpf_d_printk("tailcall failed");
 
     return SK_PASS;
 }
 
 //k_tail_write_msg_traceparent
 SEC("sk_msg")
-int beyla_packet_extender_write_msg_tp(struct sk_msg_md *msg) {
+int obi_packet_extender_write_msg_tp(struct sk_msg_md *msg) {
     bpf_dbg_printk("== %s ==", __FUNCTION__);
 
     tp_info_pid_t *tp_p = tp_buf();
@@ -507,7 +541,7 @@ int beyla_packet_extender_write_msg_tp(struct sk_msg_md *msg) {
     if (tp_p->written) {
         set_tp_info_pid(e_key, tp_p);
     } else {
-        bpf_dbg_printk("failed to write traceparent");
+        bpf_d_printk("failed to write traceparent");
     }
 
     bpf_dbg_printk("BUF = [%s]", msg->data);
