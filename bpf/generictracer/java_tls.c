@@ -28,13 +28,17 @@ static __always_inline u8 cmd_to_op(u8 cmd) {
         return TCP_SEND;
     case ioctl_java_recv:
         return TCP_RECV;
+    default:
+        return ioctl_invalid_op;
     }
-    return ioctl_invalid_op;
 }
 
 SEC("kprobe/do_vfs_ioctl")
 int BPF_KPROBE(
     beyla_kprobe_do_vfs_ioctl, void *filp, unsigned int fd, unsigned int cmd, void *arg) {
+    (void)ctx;
+    (void)filp;
+
     u64 id = bpf_get_current_pid_tgid();
 
     if (!valid_pid(id)) {
