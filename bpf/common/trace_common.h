@@ -210,6 +210,17 @@ static __always_inline tp_info_pid_t *find_parent_trace(const pid_connection_inf
         return node_tp;
     }
 
+    // Python code
+    // t_key is the client trace_key_t *
+    // 1. find the current python context
+    // u64 *context = bpf_map_lookup_elem(&current_python_context_map, t_key);
+    // if (context) {
+    // 2. find parent thread for this context
+    // trace_key_t *parent_key = bpf_map_lookup_elem(&parent_context_map, context);
+    // if (parent_key) {
+    // 3. tp_info_pid_t *proc_parent = find_parent_process_trace(parent_key);
+    // if (proc_parent) { return proc_parent}
+
     bpf_dbg_printk("Looking up parent trace for pid=%d, ns=%lx, extra_id=%llx",
                    t_key->p_key.pid,
                    t_key->p_key.ns,

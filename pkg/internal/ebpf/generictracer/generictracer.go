@@ -421,6 +421,16 @@ func (p *Tracer) UProbes() map[string]map[string][]*ebpfcommon.ProbeDesc {
 				Start:    p.bpfObjects.ObiUvFsAccess,
 			}},
 		},
+		"libpython3.12.so": {
+			"context_run": {{
+				Required: false,
+				Start:    p.bpfObjects.ObiUprobeContextRun,
+			}},
+			"PyContext_CopyCurrent": {{
+				Required: false,
+				End:      p.bpfObjects.ObiUprobeCopyCurrentRet,
+			}},
+		},
 	}
 }
 
