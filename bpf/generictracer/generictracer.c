@@ -9,5 +9,6 @@
 #include "nodejs.c"
 #include "java_tls.c"
 #include "ruby.c"
+#include <pid/maps/pid_metadata_storage.h>
 
 char __license[] SEC("license") = "Dual MIT/GPL";

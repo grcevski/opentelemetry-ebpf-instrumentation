@@ -208,8 +208,7 @@ static __always_inline u8 is_http(const unsigned char *p, u32 len, u8 *packet_ty
         return 0;
     }
     //HTTP/1.x
-    if ((p[0] == 'H') && (p[1] == 'T') && (p[2] == 'T') && (p[3] == 'P') && (p[4] == '/') &&
-        (p[5] == '1') && (p[6] == '.')) {
+    if (is_http_response_buf(p)) {
         *packet_type = PACKET_TYPE_RESPONSE;
         return 1;
     } else if (is_http_request_buf(p)) {

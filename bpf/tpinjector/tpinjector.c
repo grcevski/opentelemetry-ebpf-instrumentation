@@ -1,6 +1,8 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
+#include "bpfcore/utils.h"
+#include "bpfcore/vmlinux_amd64.h"
 #include <bpfcore/vmlinux.h>
 #include <bpfcore/bpf_helpers.h>
 #include <bpfcore/bpf_endian.h>
@@ -31,6 +33,9 @@
 
 #include <tpinjector/maps/sk_tp_info_pid_map.h>
 
+#include <pid/types/pid_metadata.h>
+#include <pid/maps/pid_metadata_storage.h>
+
 char __license[] SEC("license") = "Dual MIT/GPL";
 
 // Flags to control what tpinjector should inject
@@ -47,20 +52,35 @@ volatile const u32 inject_flags =
 // Better than experimental options (253-254) which must not be shipped as defaults
 enum { k_tcp_option_kind_otel = 25 };
 
-enum { k_tail_write_msg_traceparent, k_tail_find_existing_tp, k_tail_create_tp };
+enum { k_inject_metadata_header_len = 10 };
+
+enum {
+    k_tail_write_msg_traceparent,
+    k_tail_find_existing_tp,
+    k_tail_create_tp,
+    k_tail_extend_and_write_tp,
+    k_tail_extend_and_write_response,
+    k_tail_write_response_metadata,
+};
 
 int obi_packet_extender_write_msg_tp(struct sk_msg_md *msg);
 int obi_packet_extender_find_existing_tp(struct sk_msg_md *msg);
 int obi_packet_extender_create_tp(struct sk_msg_md *msg);
+int obi_extend_and_write_tp(struct sk_msg_md *msg);
+int obi_extend_and_write_response(struct sk_msg_md *msg);
+int obi_write_response_metadata(struct sk_msg_md *msg);
 
 struct {
     __uint(type, BPF_MAP_TYPE_PROG_ARRAY);
-    __uint(max_entries, 3);
+    __uint(max_entries, 6);
     __uint(key_size, sizeof(u32));
     __array(values, int(void *));
 } extender_jump_table SEC(".maps") = {
     .values =
         {
+            [k_tail_extend_and_write_tp] = (void *)&obi_extend_and_write_tp,
+            [k_tail_extend_and_write_response] = (void *)&obi_extend_and_write_response,
+            [k_tail_write_response_metadata] = (void *)&obi_write_response_metadata,
             [k_tail_write_msg_traceparent] = (void *)&obi_packet_extender_write_msg_tp,
             [k_tail_find_existing_tp] = (void *)&obi_packet_extender_find_existing_tp,
             [k_tail_create_tp] = (void *)&obi_packet_extender_create_tp,
@@ -71,9 +91,10 @@ typedef struct tailcall_ctx {
     pid_connection_info_t p_conn;
     tp_info_t parent_tp;
     egress_key_t e_key;
+    u32 write_offset;
     u8 niter;
     bool has_parent_tp;
-    u8 pad[2];
+    u8 pad[6];
 } tailcall_ctx;
 
 SCRATCH_MEM(tailcall_ctx);
@@ -301,6 +322,9 @@ static __always_inline void bpf_sock_ops_active_est_cb(struct bpf_sock_ops *skop
 }
 
 static __always_inline void bpf_sock_ops_passive_est_cb(struct bpf_sock_ops *skops) {
+    const u64 cookie = bpf_get_socket_cookie(skops);
+
+    bpf_sock_hash_update(skops, &sock_dir, (void *)&cookie, BPF_ANY);
     bpf_sock_ops_set_flags(skops, BPF_SOCK_OPS_PARSE_ALL_HDR_OPT_CB_FLAG);
 }
 
@@ -490,6 +514,10 @@ static __always_inline u8 protocol_detector(struct sk_msg_md *msg,
         return 0;
     }
 
+    if (is_http_response_buf((const unsigned char *)msg_ptr)) {
+        return 2;
+    }
+
     // We should check if we have already seen this request and we've
     // started tracking it. We only want to extend the first packet that
     // looks like HTTP, not something that's passing HTTP in the body.
@@ -511,35 +539,35 @@ static __always_inline connection_info_t get_connection_info(struct sk_msg_md *m
     return msg->family == AF_INET6 ? sk_msg_extract_key_ip6(msg) : sk_msg_extract_key_ip4(msg);
 }
 
-// this "beauty" ensures we hold pkt in the same register being range
-// validated
-static __always_inline unsigned char *
-check_pkt_access(unsigned char *buf, //NOLINT(readability-non-const-parameter)
-                 u32 offset,
-                 const unsigned char *end) {
-    unsigned char *ret;
+static __always_inline void
+write_metadata_buffer(unsigned char *buf, pid_metadata_t *metadata, u32 metadata_len) {
+    *buf++ = 'O';
+    *buf++ = 'b';
+    *buf++ = 'i';
+    *buf++ = '-';
+    *buf++ = 'n';
+    *buf++ = 's';
+    *buf++ = ':';
+    *buf++ = ' ';
 
-    asm goto("r4 = %[buf]\n"
-             "r4 += %[offset]\n"
-             "if r4 > %[end] goto %l[error]\n"
-             "%[ret] = %[buf]"
-             : [ret] "=r"(ret)
-             : [buf] "r"(buf), [end] "r"(end), [offset] "i"(offset)
-             : "r4"
-             : error);
+    u32 len = metadata_len;
+    bpf_clamp_umax(len, k_pid_metadata_len);
 
-    return ret;
-error:
-    return NULL;
+    for (u32 i = 0; i < len; i++) {
+        unsigned char p = metadata->buf[i];
+        *buf++ = p;
+    }
+
+    *buf++ = '\r';
+    *buf++ = '\n';
 }
 
-static __always_inline void
-make_tp_string_skb(unsigned char *buf, const tp_info_t *tp, const unsigned char *end) {
-    buf = check_pkt_access(buf, TP_SIZE, end);
-
-    if (!buf) {
-        return;
-    }
+static __always_inline void make_tp_string_skb(unsigned char *buf,
+                                               const tp_info_t *tp,
+                                               pid_metadata_t *metadata,
+                                               u32 metadata_len,
+                                               const unsigned char *end) {
+    asm volatile("" : "=r"(buf) : "0"(buf));
 
     const __attribute__((unused)) unsigned char *tp_string = buf;
 
@@ -560,12 +588,18 @@ make_tp_string_skb(unsigned char *buf, const tp_info_t *tp, const unsigned char 
     // Version
     *buf++ = '0';
     *buf++ = '0';
+    if ((void *)buf + TP_SIZE + 12 > (void *)end) {
+        return;
+    }
     *buf++ = '-';
 
     // Trace ID
     encode_hex(buf, tp->trace_id, TRACE_ID_SIZE_BYTES);
     buf += TRACE_ID_CHAR_LEN;
 
+    if ((void *)buf + TP_SIZE + 12 > (void *)end) {
+        return;
+    }
     *buf++ = '-';
 
     // SpanID
@@ -579,40 +613,201 @@ make_tp_string_skb(unsigned char *buf, const tp_info_t *tp, const unsigned char 
     *buf++ = '\r';
     *buf++ = '\n';
 
+    if (metadata) {
+        write_metadata_buffer(buf, metadata, metadata_len);
+    }
+
     bpf_dbg_printk("tp_string=%s", tp_string);
 }
 
-static __always_inline bool
-extend_and_write_tp(struct sk_msg_md *msg, u32 offset, const tp_info_t *tp) {
-    const long err = bpf_msg_push_data(msg, offset, TP_SIZE, 0);
+static __always_inline void
+make_metadata_string_skb(unsigned char *buf, pid_metadata_t *metadata, u32 metadata_len) {
+    asm volatile("" : "=r"(buf) : "0"(buf));
+
+    const __attribute__((unused)) unsigned char *tp_string = buf;
+
+    write_metadata_buffer(buf, metadata, metadata_len);
+
+    bpf_dbg_printk("metadata_string=%s", tp_string);
+}
+
+SEC("sk_msg")
+int obi_extend_and_write_tp(struct sk_msg_md *msg) {
+    unsigned char *data = ctx_msg_data(msg);
+
+    if (!data) {
+        return SK_PASS;
+    }
+
+    tailcall_ctx *t_ctx = tailcall_ctx_mem();
+
+    if (!t_ctx) {
+        return SK_PASS;
+    }
+
+    tp_info_pid_t *tp_p = tp_buf();
+
+    if (!tp_p) {
+        return SK_PASS;
+    }
+
+    const u64 id = bpf_get_current_pid_tgid();
+    const u32 host_pid = pid_from_pid_tgid(id);
+
+    u32 expand_size = TP_SIZE;
+    pid_metadata_t *metadata = bpf_map_lookup_elem(&pid_names, &host_pid);
+    u32 metadata_len = 0;
+    if (metadata) {
+        bpf_d_printk("found metadata, size=%d!", metadata->len);
+        if (metadata->len < 16) {
+            metadata_len = 16;
+        } else if (metadata->len < 32) {
+            metadata_len = 32;
+        } else {
+            metadata_len = k_pid_metadata_len;
+        }
+        expand_size += k_inject_metadata_header_len + metadata_len;
+    }
+
+    const long err = bpf_msg_push_data(msg, t_ctx->write_offset, expand_size, 0);
+
+    bpf_clamp_umax(expand_size, 256);
 
     if (err != 0) {
         bpf_d_printk("failed to push data: %d [%s]", err, __FUNCTION__);
-        return false;
+        return SK_PASS;
     }
 
     bpf_msg_pull_data(msg, 0, msg->size, 0);
-    bpf_dbg_printk(
-        "offset to split=%d, available=%u, size=%u", offset, msg->data_end - msg->data, msg->size);
+    bpf_dbg_printk("offset to split=%d, available=%u, size=%u",
+                   t_ctx->write_offset,
+                   msg->data_end - msg->data,
+                   msg->size);
 
     if (!msg->data) {
         bpf_d_printk("null data [%s]", __FUNCTION__);
-        return false;
+        return SK_PASS;
     }
 
-    unsigned char *ptr = msg->data + offset;
+    u32 off = t_ctx->write_offset;
+    bpf_clamp_umax(off, 4096);
 
-    if ((void *)ptr + TP_SIZE >= msg->data_end) {
+    unsigned char *ptr = msg->data + off;
+
+    if ((void *)ptr + TP_SIZE + metadata_len + k_inject_metadata_header_len >= msg->data_end) {
         bpf_d_printk("not enough space [%s]", __FUNCTION__);
-        return false;
+        return SK_PASS;
     }
 
-    make_tp_string_skb(ptr, tp, msg->data_end);
+    make_tp_string_skb(ptr, &tp_p->tp, metadata, metadata_len, msg->data_end);
 
-    return true;
+    return SK_PASS;
 }
 
-static __always_inline bool write_msg_traceparent(struct sk_msg_md *msg, const tp_info_t *tp) {
+SEC("sk_msg")
+int obi_extend_and_write_response(struct sk_msg_md *msg) {
+    unsigned char *data = ctx_msg_data(msg);
+
+    if (!data) {
+        return SK_PASS;
+    }
+
+    tailcall_ctx *t_ctx = tailcall_ctx_mem();
+
+    if (!t_ctx) {
+        return SK_PASS;
+    }
+
+    u32 write_offset = t_ctx->write_offset;
+
+    tp_info_pid_t *tp_p = tp_buf();
+
+    if (!tp_p) {
+        return SK_PASS;
+    }
+
+    const u64 id = bpf_get_current_pid_tgid();
+    const u32 host_pid = pid_from_pid_tgid(id);
+
+    pid_metadata_t *metadata = bpf_map_lookup_elem(&pid_names, &host_pid);
+    if (!metadata) {
+        return SK_PASS;
+    }
+    bpf_printk("found metadata, size=%d!", metadata->len);
+
+    u32 extra_len = k_pid_metadata_len;
+    if (metadata->len < 16) {
+        extra_len = 16;
+    } else if (metadata->len < 32) {
+        extra_len = 32;
+    }
+
+    u32 expand_size = k_inject_metadata_header_len + extra_len;
+
+    const long err = bpf_msg_push_data(msg, write_offset, expand_size, 0);
+
+    bpf_clamp_umax(expand_size, 256);
+
+    if (err != 0) {
+        bpf_d_printk("failed to push data: %d [%s]", err, __FUNCTION__);
+        return SK_PASS;
+    }
+
+    bpf_msg_pull_data(msg, 0, msg->size, 0);
+    bpf_dbg_printk("offset to split=%d, available=%u, size=%u",
+                   write_offset,
+                   msg->data_end - msg->data,
+                   msg->size);
+
+    if (!msg->data) {
+        bpf_d_printk("null data [%s]", __FUNCTION__);
+        return SK_PASS;
+    }
+
+    bpf_clamp_umax(write_offset, 4096);
+
+    unsigned char *ptr = msg->data + write_offset;
+
+    if ((void *)ptr + expand_size + k_inject_metadata_header_len >= msg->data_end) {
+        bpf_d_printk("not enough space [%s]", __FUNCTION__);
+        return SK_PASS;
+    }
+
+    make_metadata_string_skb(ptr, metadata, extra_len);
+
+    return SK_PASS;
+}
+
+SEC("sk_msg")
+int obi_write_response_metadata(struct sk_msg_md *msg) {
+    unsigned char *data = ctx_msg_data(msg);
+
+    if (!data) {
+        return SK_PASS;
+    }
+
+    const u32 newline_pos = find_first_pos_of(data, ctx_msg_data_end(msg), '\n');
+
+    if (newline_pos == INVALID_POS) {
+        return false;
+    }
+
+    u32 write_offset = newline_pos + 1;
+
+    tailcall_ctx *t_ctx = tailcall_ctx_mem();
+
+    if (!t_ctx) {
+        return false;
+    }
+
+    t_ctx->write_offset = write_offset;
+
+    bpf_tail_call_static(msg, &extender_jump_table, k_tail_extend_and_write_response);
+
+    return SK_PASS;
+}
+
+static __always_inline bool write_msg_traceparent(struct sk_msg_md *msg) {
     unsigned char *data = ctx_msg_data(msg);
 
     if (!data) {
@@ -627,7 +822,18 @@ static __always_inline bool write_msg_traceparent(struct sk_msg_md *msg, const t
 
     const u32 write_offset = newline_pos + 1;
 
-    return extend_and_write_tp(msg, write_offset, tp);
+    tailcall_ctx *t_ctx = tailcall_ctx_mem();
+
+    if (!t_ctx) {
+        return false;
+    }
+
+    t_ctx->write_offset = write_offset;
+
+    bpf_tail_call_static(msg, &extender_jump_table, k_tail_extend_and_write_tp);
+
+    bpf_d_printk("tailcall failed [%s]", __FUNCTION__);
+    return true;
 }
 
 static __always_inline void schedule_write_tcp_option(struct sk_msg_md *msg, tp_info_pid_t *tp_p) {
@@ -686,7 +892,7 @@ static __always_inline void handle_existing_tp_pid(struct sk_msg_md *msg,
     // (it could be an SSL packet instead, or just rubbish, for instance)
     const bool is_http = protocol_detector(msg, id, conn, e_key);
 
-    if (is_http) {
+    if (is_http == 1) {
         // here we'll leave it for protocol_http clean it up
         if (inject_flags & k_inject_http_headers) {
             write_http_traceparent(msg, tp_pid);
@@ -770,7 +976,11 @@ int obi_packet_extender(struct sk_msg_md *msg) {
 
     init_tp_ctx_parent_tp(t_ctx);
 
-    bpf_tail_call_static(msg, &extender_jump_table, k_tail_find_existing_tp);
+    if (is_http == 2) {
+        bpf_tail_call_static(msg, &extender_jump_table, k_tail_write_response_metadata);
+    } else {
+        bpf_tail_call_static(msg, &extender_jump_table, k_tail_find_existing_tp);
+    }
 
     return SK_PASS;
 }
@@ -789,7 +999,7 @@ int obi_packet_extender_write_msg_tp(struct sk_msg_md *msg) {
 
     bpf_msg_pull_data(msg, 0, msg->size, 0);
 
-    if (!write_msg_traceparent(msg, &tp_p->tp)) {
+    if (!write_msg_traceparent(msg)) {
         bpf_d_printk("failed to write traceparent [%s]", __FUNCTION__);
     }
 

@@ -132,6 +132,19 @@ func httpRequestResponseToSpan(parseCtx *EBPFParseContext, event *BPFHTTPInfo, r
 		Statement: scheme + request.SchemeHostSeparator + headerHost,
 	}
 
+	metadata := ""
+	if reqType == request.EventTypeHTTPClient {
+		if val := resp.Header.Get("Obi-ns"); val != "" {
+			metadata = val
+		}
+	} else {
+		if val := req.Header.Get("Obi-ns"); val != "" {
+			metadata = val
+		}
+	}
+
+	setMetadataOnSpan(&httpSpan, metadata)
+
 	if isClientEvent(event.Type) && parseCtx != nil && parseCtx.payloadExtraction.HTTP.AWS.Enabled {
 		span, ok := ebpfhttp.AWSS3Span(&httpSpan, req, resp)
 		if ok {
@@ -221,19 +234,19 @@ func HTTPInfoEventToSpan(parseCtx *EBPFParseContext, event *BPFHTTPInfo) (reques
 	if parseCtx != nil && !parseCtx.payloadExtraction.Enabled() {
 		// There's no need to parse HTTP headers/body,
 		// create the span directly.
-		return httpRequestToSpan(event, requestBuffer), false, nil
+		return httpRequestToSpan(event, requestBuffer, responseBuffer), false, nil
 	}
 
 	if !hasResponse {
 		// Large buffers disabled
-		return httpRequestToSpan(event, requestBuffer), false, nil
+		return httpRequestToSpan(event, requestBuffer, responseBuffer), false, nil
 	}
 
 	req, err := http.ReadRequest(bufio.NewReader(bytes.NewReader(requestBuffer)))
 	resp, err2 := httpSafeParseResponse(responseBuffer, req)
-	if err != nil || err2 != nil {
+	if err != nil || err2 != nil || req == nil || resp == nil {
 		slog.Debug("error while parsing http request or response, falling back to manual HTTP info parsing", "reqErr", err, "respErr", err2)
-		return httpRequestToSpan(event, requestBuffer), false, nil
+		return httpRequestToSpan(event, requestBuffer, responseBuffer), false, nil
 	}
 
 	return httpRequestResponseToSpan(parseCtx, event, req, resp), false, nil
@@ -254,7 +267,7 @@ func httpSafeParseResponse(responseBuffer []byte, req *http.Request) (*http.Resp
 	return resp, nil
 }
 
-func httpRequestToSpan(event *BPFHTTPInfo, requestBuffer []byte) request.Span {
+func httpRequestToSpan(event *BPFHTTPInfo, requestBuffer []byte, responseBuffer []byte) request.Span {
 	var (
 		result     = HTTPInfo{BPFHTTPInfo: *event}
 		bufHost    string
@@ -286,7 +299,59 @@ func httpRequestToSpan(event *BPFHTTPInfo, requestBuffer []byte) request.Span {
 
 	result.HeaderHost = bufHost
 
-	return httpInfoToSpanLegacy(&result)
+	span := httpInfoToSpanLegacy(&result)
+
+	metadata := ""
+	if len(responseBuffer) > 0 && span.Type == request.EventTypeHTTPClient {
+		metadata = findObiNs(responseBuffer)
+	} else if len(requestBuffer) > 0 && span.Type == request.EventTypeHTTP {
+		metadata = findObiNs(requestBuffer)
+	}
+
+	setMetadataOnSpan(&span, metadata)
+
+	return span
+}
+
+func setMetadataOnSpan(span *request.Span, metadata string) {
+	if len(metadata) > 0 {
+		delim := strings.IndexByte(metadata, '=')
+		if delim > 0 {
+			if span.Type == request.EventTypeHTTPClient {
+				span.HostName = metadata[0:delim]
+			} else {
+				span.PeerName = metadata[0:delim]
+			}
+			if delim < len(metadata)-1 {
+				metadata := metadata[delim+1:]
+				delim := strings.IndexByte(metadata, '=')
+				if delim > 0 {
+					span.OtherNamespace = metadata[0:delim]
+				}
+			}
+		}
+	}
+}
+
+func findObiNs(b []byte) string {
+	buf := cstr(b)
+
+	header := "Obi-ns: "
+	idx := strings.Index(buf, header)
+
+	if idx < 0 {
+		return ""
+	}
+
+	buf = buf[idx+len(header):]
+
+	rIdx := strings.Index(buf, "\r")
+
+	if rIdx < 0 {
+		return ""
+	}
+
+	return buf[:rIdx]
 }
 
 func httpURLFromBuf(req []byte) string {

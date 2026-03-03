@@ -119,3 +119,8 @@ static __always_inline u8 is_http_request_buf(const unsigned char *p) {
              (p[5] == 'N') && (p[6] == 'S') && (p[7] == ' ') && (p[8] == '/')) // OPTIONS
     );
 }
+
+static __always_inline u8 is_http_response_buf(const unsigned char *p) {
+    return ((p[0] == 'H') && (p[1] == 'T') && (p[2] == 'T') && (p[3] == 'P') && (p[4] == '/') &&
+            (p[5] == '1') && (p[6] == '.'));
+}

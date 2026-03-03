@@ -117,9 +117,36 @@ func (p *Tracer) rebuildValidPids() {
 	}
 }
 
+func (p *Tracer) addPidMetadata(pid app.PID, svc *svc.Attrs) {
+	if p.bpfObjects.PidNames != nil {
+		var metadata BpfPidMetadataT
+		name := svc.UID.Name + "=" + svc.UID.Namespace
+
+		size := len(name)
+		if size > len(metadata.Buf) {
+			size = len(metadata.Buf)
+		}
+		metadata.Len = uint32(size)
+
+		for i := 0; i < size; i++ {
+			metadata.Buf[i] = uint8(name[i])
+		}
+
+		for i := size; i < len(metadata.Buf); i++ {
+			metadata.Buf[i] = '='
+		}
+
+		p.log.Info("metadata", "name", name)
+		if err := p.bpfObjects.PidNames.Put(uint32(pid), metadata); err != nil {
+			p.log.Error("Error setting pid metadata", "error", err)
+		}
+	}
+}
+
 func (p *Tracer) AllowPID(pid app.PID, ns uint32, svc *svc.Attrs) {
 	p.pidsFilter.AllowPID(pid, ns, svc, ebpfcommon.PIDTypeKProbes)
 	p.rebuildValidPids()
+	p.addPidMetadata(pid, svc)
 }
 
 func (p *Tracer) BlockPID(pid app.PID, ns uint32) {
