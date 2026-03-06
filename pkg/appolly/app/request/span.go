@@ -955,6 +955,10 @@ func (s *Span) isMetricsExportURL() bool {
 	}
 }
 
+func (s *Span) IsDNSSpan() bool {
+	return s.Type == EventTypeDNS
+}
+
 func (s *Span) isTracesExportURL() bool {
 	switch s.Type {
 	case EventTypeGRPCClient:
