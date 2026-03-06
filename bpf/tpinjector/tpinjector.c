@@ -53,7 +53,8 @@ volatile const u32 inject_flags =
 // Better than experimental options (253-254) which must not be shipped as defaults
 enum { k_tcp_option_kind_otel = 25 };
 
-enum { k_inject_metadata_header_len = 10 };
+const char obi_ctx[] = "Obi-Context: \r\n";
+const u32 k_inject_metadata_header_len = sizeof(obi_ctx) - 1;
 
 enum { k_protocol_detect_request = 1, k_protocol_detect_response = 2 };
 
@@ -555,8 +556,13 @@ write_metadata_buffer(unsigned char *buf, pid_metadata_t *metadata, u32 metadata
     *buf++ = 'b';
     *buf++ = 'i';
     *buf++ = '-';
-    *buf++ = 'N';
-    *buf++ = 's';
+    *buf++ = 'C';
+    *buf++ = 'o';
+    *buf++ = 'n';
+    *buf++ = 't';
+    *buf++ = 'e';
+    *buf++ = 'x';
+    *buf++ = 't';
     *buf++ = ':';
     *buf++ = ' ';
 

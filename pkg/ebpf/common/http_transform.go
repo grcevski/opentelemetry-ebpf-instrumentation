@@ -21,6 +21,8 @@ import (
 	"go.opentelemetry.io/obi/pkg/internal/largebuf"
 )
 
+const obiContextHeader = "Obi-Context"
+
 func removeQuery(url string) string {
 	idx := strings.IndexByte(url, '?')
 	if idx > 0 {
@@ -135,11 +137,11 @@ func httpRequestResponseToSpan(parseCtx *EBPFParseContext, event *BPFHTTPInfo, r
 
 	metadata := ""
 	if reqType == request.EventTypeHTTPClient {
-		if val := resp.Header.Get("Obi-Ns"); val != "" {
+		if val := resp.Header.Get(obiContextHeader); val != "" {
 			metadata = val
 		}
 	} else {
-		if val := req.Header.Get("Obi-Ns"); val != "" {
+		if val := req.Header.Get(obiContextHeader); val != "" {
 			metadata = val
 		}
 	}
@@ -272,7 +274,7 @@ func httpSafeParseResponse(responseBuffer *largebuf.LargeBuffer, req *http.Reque
 	return resp, nil
 }
 
-func httpRequestToSpan(event *BPFHTTPInfo, requestBuffer *largebuf.LargeBuffer) request.Span {
+func httpRequestToSpan(event *BPFHTTPInfo, requestBuffer *largebuf.LargeBuffer, responseBuffer *largebuf.LargeBuffer) request.Span {
 	var (
 		result     = HTTPInfo{BPFHTTPInfo: *event}
 		bufHost    string
@@ -308,11 +310,12 @@ func httpRequestToSpan(event *BPFHTTPInfo, requestBuffer *largebuf.LargeBuffer) 
 
 	span := httpInfoToSpanLegacy(&result)
 
+	respRaw := requestBuffer.UnsafeView()
 	metadata := ""
-	if len(responseBuffer) > 0 && span.Type == request.EventTypeHTTPClient {
-		metadata = findObiNs(responseBuffer)
-	} else if len(requestBuffer) > 0 && span.Type == request.EventTypeHTTP {
-		metadata = findObiNs(requestBuffer)
+	if len(respRaw) > 0 && span.Type == request.EventTypeHTTPClient {
+		metadata = findObiContext(respRaw)
+	} else if len(respRaw) > 0 && span.Type == request.EventTypeHTTP {
+		metadata = findObiContext(respRaw)
 	}
 
 	setMetadataOnSpan(&span, metadata)
@@ -340,10 +343,10 @@ func setMetadataOnSpan(span *request.Span, metadata string) {
 	}
 }
 
-func findObiNs(b []byte) string {
+func findObiContext(b []byte) string {
 	buf := cstr(b)
 
-	header := "Obi-Ns: "
+	header := obiContextHeader + ": "
 	idx := strings.Index(buf, header)
 
 	if idx < 0 {
