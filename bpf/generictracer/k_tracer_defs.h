@@ -34,7 +34,7 @@ protocol_type_for_conn_info(const pid_connection_info_t *info) {
     const enum protocol_type *cached_protocol_type =
         bpf_map_lookup_elem(&protocol_cache, &info->conn);
     if (!cached_protocol_type) {
-        if (already_tracked_http(info)) {
+        if (already_tracked_http(info, PACKET_TYPE_ANY)) {
             return k_protocol_type_http;
         }
     }

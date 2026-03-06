@@ -48,9 +48,19 @@ static __always_inline u32 trace_type_from_meta(http_connection_metadata_t *meta
     return TRACE_TYPE_SERVER;
 }
 
-static __always_inline u8 already_tracked_http(const pid_connection_info_t *p_conn) {
+static __always_inline u8 already_tracked_http(const pid_connection_info_t *p_conn, const u8 type) {
     http_info_t *http_info = bpf_map_lookup_elem(&ongoing_http, p_conn);
-    return (http_info && !(http_info->delayed || http_info->submitted));
+    if (!http_info) {
+        return false;
+    }
+    if (type == PACKET_TYPE_ANY) {
+        return true;
+    }
+
+    if (type == PACKET_TYPE_RESPONSE) {
+        return (http_info->delayed || http_info->submitted);
+    }
+    return !(http_info->delayed || http_info->submitted);
 }
 
 static __always_inline void

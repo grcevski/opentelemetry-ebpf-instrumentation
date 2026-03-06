@@ -134,11 +134,11 @@ func httpRequestResponseToSpan(parseCtx *EBPFParseContext, event *BPFHTTPInfo, r
 
 	metadata := ""
 	if reqType == request.EventTypeHTTPClient {
-		if val := resp.Header.Get("Obi-ns"); val != "" {
+		if val := resp.Header.Get("Obi-Ns"); val != "" {
 			metadata = val
 		}
 	} else {
-		if val := req.Header.Get("Obi-ns"); val != "" {
+		if val := req.Header.Get("Obi-Ns"); val != "" {
 			metadata = val
 		}
 	}
@@ -336,7 +336,7 @@ func setMetadataOnSpan(span *request.Span, metadata string) {
 func findObiNs(b []byte) string {
 	buf := cstr(b)
 
-	header := "Obi-ns: "
+	header := "Obi-Ns: "
 	idx := strings.Index(buf, header)
 
 	if idx < 0 {

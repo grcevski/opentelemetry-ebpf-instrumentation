@@ -18,6 +18,7 @@
 
 #include <logger/bpf_dbg.h>
 
+#define PACKET_TYPE_ANY 0
 #define PACKET_TYPE_REQUEST 1
 #define PACKET_TYPE_RESPONSE 2
 

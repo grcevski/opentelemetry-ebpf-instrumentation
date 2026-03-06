@@ -4,6 +4,7 @@
 package request // import "go.opentelemetry.io/obi/pkg/appolly/app/request"
 
 import (
+	"fmt"
 	"net"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -35,16 +36,21 @@ func otelUnresolvedHostGetters(unresolved UnresolvedNames) func(name attr.Name) 
 		case attr.Client:
 			return func(s *Span) attribute.KeyValue {
 				kv := getter(s)
+				fmt.Printf("client span=%s->%s\n", s.HostName, s.PeerName)
 				if s.IsClientSpan() {
 					kv.Value = attribute.StringValue(unresolvedValue(kv.Value.AsString(), unresolved.Generic))
 				} else {
 					kv.Value = attribute.StringValue(unresolvedValue(kv.Value.AsString(), unresolved.Incoming))
+					if kv.Value.AsString() == unresolved.Incoming {
+						fmt.Printf("***BAD***\n%v\n", s)
+					}
 				}
 				return kv
 			}, true
 		case attr.Server:
 			return func(s *Span) attribute.KeyValue {
 				kv := getter(s)
+				fmt.Printf("client span=%s->%s\n", s.HostName, s.PeerName)
 				if s.IsClientSpan() {
 					kv.Value = attribute.StringValue(unresolvedValue(kv.Value.AsString(), unresolved.Outgoing))
 				} else {

@@ -630,7 +630,7 @@ func (s *Span) IsValid() bool {
 
 func (s *Span) IsClientSpan() bool {
 	switch s.Type {
-	case EventTypeGRPCClient, EventTypeHTTPClient, EventTypeRedisClient, EventTypeKafkaClient, EventTypeMQTTClient, EventTypeSQLClient, EventTypeMongoClient, EventTypeFailedConnect, EventTypeCouchbaseClient:
+	case EventTypeGRPCClient, EventTypeDNS, EventTypeHTTPClient, EventTypeRedisClient, EventTypeKafkaClient, EventTypeMQTTClient, EventTypeSQLClient, EventTypeMongoClient, EventTypeFailedConnect, EventTypeCouchbaseClient:
 		return true
 	}
 
@@ -1059,6 +1059,15 @@ func (s *Span) IsExportTracesSpan(defaultOtlpGRPCPort int) bool {
 }
 
 func (s *Span) IsSelfReferenceSpan() bool {
+	if s.IsClientSpan() {
+		if s.HostName != "" && s.HostName != s.Service.UID.Name {
+			return false
+		}
+	} else {
+		if s.PeerName != "" && s.PeerName != s.Service.UID.Name {
+			return false
+		}
+	}
 	return s.Peer == s.Host && (s.Service.UID.Namespace == s.OtherNamespace || s.OtherNamespace == "")
 }
 

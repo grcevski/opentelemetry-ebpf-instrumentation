@@ -3,6 +3,7 @@
 
 #include "bpfcore/utils.h"
 #include "bpfcore/vmlinux_amd64.h"
+#include "generictracer/protocol_common.h"
 #include <bpfcore/vmlinux.h>
 #include <bpfcore/bpf_helpers.h>
 #include <bpfcore/bpf_endian.h>
@@ -53,6 +54,8 @@ volatile const u32 inject_flags =
 enum { k_tcp_option_kind_otel = 25 };
 
 enum { k_inject_metadata_header_len = 10 };
+
+enum { k_protocol_detect_request = 1, k_protocol_detect_response = 2 };
 
 enum {
     k_tail_write_msg_traceparent,
@@ -183,8 +186,8 @@ static __always_inline void clear_tp_info_pid(const egress_key_t *e_key) {
     bpf_map_delete_elem(&outgoing_trace_map, e_key);
 }
 
-static __always_inline u8 already_tracked(const pid_connection_info_t *p_conn) {
-    return already_tracked_http(p_conn) || already_tracked_tcp(p_conn) ||
+static __always_inline u8 already_tracked(const pid_connection_info_t *p_conn, const u8 type) {
+    return already_tracked_http(p_conn, type) || already_tracked_tcp(p_conn) ||
            already_tracked_http2(p_conn);
 }
 
@@ -514,14 +517,17 @@ static __always_inline u8 protocol_detector(struct sk_msg_md *msg,
         return 0;
     }
 
-    if (is_http_response_buf((const unsigned char *)msg_ptr)) {
-        return 2;
+    u8 pkt_type = PACKET_TYPE_REQUEST;
+
+    u8 is_response = is_http_response_buf((const unsigned char *)msg_ptr);
+    if (is_response) {
+        pkt_type = PACKET_TYPE_RESPONSE;
     }
 
     // We should check if we have already seen this request and we've
     // started tracking it. We only want to extend the first packet that
     // looks like HTTP, not something that's passing HTTP in the body.
-    if (already_tracked(&p_conn)) {
+    if (already_tracked(&p_conn, pkt_type)) {
         bpf_dbg_printk("already extended before, ignoring this packet...");
         return 0;
     }
@@ -529,7 +535,11 @@ static __always_inline u8 protocol_detector(struct sk_msg_md *msg,
     if (is_http_request_buf((const unsigned char *)msg_ptr)) {
         bpf_dbg_printk("setting up request to be extended");
 
-        return 1;
+        return k_protocol_detect_request;
+    }
+
+    if (is_response) {
+        return k_protocol_detect_response;
     }
 
     return 0;
@@ -545,7 +555,7 @@ write_metadata_buffer(unsigned char *buf, pid_metadata_t *metadata, u32 metadata
     *buf++ = 'b';
     *buf++ = 'i';
     *buf++ = '-';
-    *buf++ = 'n';
+    *buf++ = 'N';
     *buf++ = 's';
     *buf++ = ':';
     *buf++ = ' ';
@@ -892,7 +902,7 @@ static __always_inline void handle_existing_tp_pid(struct sk_msg_md *msg,
     // (it could be an SSL packet instead, or just rubbish, for instance)
     const bool is_http = protocol_detector(msg, id, conn, e_key);
 
-    if (is_http == 1) {
+    if (is_http == k_protocol_detect_request) {
         // here we'll leave it for protocol_http clean it up
         if (inject_flags & k_inject_http_headers) {
             write_http_traceparent(msg, tp_pid);
@@ -976,7 +986,7 @@ int obi_packet_extender(struct sk_msg_md *msg) {
 
     init_tp_ctx_parent_tp(t_ctx);
 
-    if (is_http == 2) {
+    if (is_http == k_protocol_detect_response) {
         bpf_tail_call_static(msg, &extender_jump_table, k_tail_write_response_metadata);
     } else {
         bpf_tail_call_static(msg, &extender_jump_table, k_tail_find_existing_tp);
