@@ -1,0 +1,31 @@
+file_format: "1.0"
+log_level: info
+extensions:
+  obi:
+    version: "2.0"
+    capture:
+      policy:
+        default_action: exclude
+        poll_interval: 500ms
+        min_process_age: 0s
+      rules:
+        - action: include
+          match:
+            process:
+              open_ports: "3030"
+      instrumentation:
+        http:
+          track_request_headers: true
+    correlation:
+      log_trace_annotation:
+        enabled: true
+        match:
+          - process:
+              open_ports: "3030"
+        # Both destinations must share a writer to reproduce queued fd retention.
+        async_writer:
+          workers: 1
+          channel_len: 500
+    daemon:
+      logging:
+        debug_trace_output: text

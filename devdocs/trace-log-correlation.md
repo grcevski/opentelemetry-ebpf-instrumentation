@@ -29,6 +29,13 @@ The logenricher hooks into write paths (`tty_write`, `pipe_write`, `ksys_write`,
 3. Overwrites the original user buffer with zeros via `bpf_probe_write_user` to suppress the un-enriched line.
 4. User-space reads from the ring buffer and re-emits the log with trace context injected into a JSON object or plain-text line.
 
+Full pipes backpressure their shard while their applications remain registered;
+queued logs do not expire. Once the last registered owner exits or redirects
+away from a pipe, its captured logs have one second to drain before OBI closes
+its remaining descriptors. This releases EOF even if another live destination
+has stalled the shard. Logs still pending at that point are dropped; an
+interrupted write may have delivered only part of its output.
+
 Because the original user buffer is zeroed out (step 3), the container log file will contain NULL characters in place of the original log line, terminated with `\n`. For writes up to 8 KiB this produces one fully-zeroed placeholder line that downstream tooling can drop with a single regex (see [Filtering the suppressed placeholder lines](#filtering-the-suppressed-placeholder-lines)). For writes larger than 8 KiB only the first 8 KiB is zeroed and terminated with `\n`; the remainder of the write reaches the container log un-enriched and will not match the placeholder regex — see [Limits](#limits). The enriched line is written separately by user-space, and the NULL suppression prevents the container runtime from capturing the un-enriched duplicate.
 
 OBI only fills configured fields that are not already present. JSON keys are matched literally. In plain text, a field token starts at the beginning of a line or after ASCII whitespace and contains the configured name followed by `=`. If the application's logger or SDK already injected a field, its value is preserved. For services OBI detects as exporting OTel traces directly (see [exclude-otel-instrumented-services](exclude-otel-instrumented-services.md)), only the trace field is injected: OBI's BPF-generated span ID would not match the SDK's actual span.

@@ -1,0 +1,42 @@
+services:
+  workload:
+    build:
+      context: ../../..
+      dockerfile: internal/test/integration/components/logenricher_shutdown/Dockerfile
+    image: hatest-testserver-logenricher-shutdown
+    ports:
+      - "8383:3030"
+    logging:
+      driver: json-file
+      options:
+        max-size: "1m"
+        max-file: "2"
+
+  stalled:
+    build:
+      context: ../../..
+      dockerfile: internal/test/integration/components/logenricher_shutdown/Dockerfile
+    image: hatest-testserver-logenricher-stalled
+    command: ["node", "reader.js"]
+    ports:
+      - "8384:3030"
+      - "8385:3031"
+
+  obi:
+    build:
+      context: ../../..
+      dockerfile: internal/test/integration/components/obi/Dockerfile
+    image: hatest-obi
+    privileged: true
+    pid: host
+    volumes:
+      - ./configs:/configs:ro
+      - /sys/kernel/security:/sys/kernel/security:ro
+      - /sys/fs/bpf:/sys/fs/bpf
+      - ../../../testoutput:/coverage
+    environment:
+      OTEL_EBPF_CONFIG_PATH: /configs/obi-config-log-enricher-shutdown.yml
+      GOCOVERDIR: /coverage
+    depends_on:
+      - workload
+      - stalled

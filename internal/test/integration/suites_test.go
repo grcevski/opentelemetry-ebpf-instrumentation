@@ -1426,6 +1426,16 @@ func TestSuite_LogEnricherNodeJSConfigV2(t *testing.T) {
 	logEnricherNodeJSSuite(t, logEnricherConfigV2)
 }
 
+func TestSuite_LogEnricherNodeJSShutdown(t *testing.T) {
+	compose, err := docker.ComposeSuite("docker-compose-log-enricher-shutdown.yml",
+		path.Join(pathOutput, "test-suite-log-enricher-nodejs-shutdown.log"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, compose.Close()) })
+	require.NoError(t, compose.Up())
+
+	testLogEnricherNodeJSShutdown(t, compose)
+}
+
 func logEnricherJavaSuite(t *testing.T, configSuffix string) {
 	logEnricherSuite(t, "java", configSuffix, []string{`OTEL_EBPF_OPEN_PORT=8085`, `OTEL_EBPF_EXECUTABLE_PATH=`}, func(t *testing.T) {
 		t.Run("Log Enricher Java", func(t *testing.T) {
