@@ -10,6 +10,7 @@ import (
 	"os"
 	osexec "os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -21,6 +22,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
+
+	"go.opentelemetry.io/obi/pkg/internal/shardedqueue"
+	"go.opentelemetry.io/obi/pkg/obi"
 )
 
 func newPipeTestTracer(t *testing.T) *Tracer {
@@ -466,7 +470,7 @@ func TestOpenDestinationReaderlessFifoFailsFast(t *testing.T) {
 		t.Fatal("open blocked on a reader-less fifo")
 	}
 
-	// with a reader present the open succeeds and the write path is blocking
+	// With a reader present, writes remain pollable and honor deadlines.
 	reader, err := os.OpenFile(fifo, os.O_RDONLY|unix.O_NONBLOCK, 0)
 	require.NoError(t, err)
 	defer reader.Close()
@@ -475,9 +479,9 @@ func TestOpenDestinationReaderlessFifoFailsFast(t *testing.T) {
 	require.NoError(t, err)
 	defer d.release()
 
-	flags, err := unix.FcntlInt(d.f.Fd(), unix.F_GETFL, 0)
-	require.NoError(t, err)
-	assert.Zero(t, flags&unix.O_NONBLOCK, "write path must be blocking for backpressure")
+	require.NoError(t, d.f.SetWriteDeadline(time.Now().Add(-time.Second)))
+	_, err = d.f.Write([]byte("expired log\n"))
+	require.ErrorIs(t, err, os.ErrDeadlineExceeded)
 }
 
 // a queued line owns its destination reference: even when its sole owner
@@ -530,7 +534,6 @@ func TestQueuedLineSurvivesSoleOwnerExit(t *testing.T) {
 
 func TestRetiredPipeDestinationIsNotCached(t *testing.T) {
 	tr := newTestTracer(t, false)
-	tr.logPipes = map[pipeKey]map[uint32][]int{}
 	tr.fdCache = expirable.NewLRU[string, *destFile](1, func(_ string, d *destFile) {
 		d.release()
 	}, time.Minute)
@@ -544,7 +547,9 @@ func TestRetiredPipeDestinationIsNotCached(t *testing.T) {
 	fd := int(outW.Fd())
 	path := procFdPath(pid, fd)
 	key := fdKey(t, outW)
-	tr.logPipes[key] = map[uint32][]int{pid: {fd}}
+	pipe := newLogPipe()
+	pipe.owners[pid] = []int{fd}
+	tr.logPipes[key] = pipe
 
 	f, err := openDestFile(path)
 	require.NoError(t, err)
@@ -553,6 +558,7 @@ func TestRetiredPipeDestinationIsNotCached(t *testing.T) {
 
 	tr.pipesMU.Lock()
 	delete(tr.logPipes, key)
+	pipe.retire()
 	tr.pipesMU.Unlock()
 	require.NoError(t, outW.Close())
 
@@ -573,6 +579,151 @@ func TestRetiredPipeDestinationIsNotCached(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("reader did not see EOF: retired destination was cached after teardown")
 	}
+}
+
+func TestLivePipeBackpressurePreservesQueuedLogs(t *testing.T) {
+	tr := newTestTracer(t, false)
+	tr.fdCache = expirable.NewLRU[string, *destFile](1, func(_ string, d *destFile) {
+		d.release()
+	}, time.Minute)
+	t.Cleanup(tr.fdCache.Purge)
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	defer r.Close()
+	defer w.Close()
+	capacity, err := unix.FcntlInt(w.Fd(), unix.F_GETPIPE_SZ, 0)
+	require.NoError(t, err)
+	filler := strings.Repeat("x", capacity)
+	_, err = w.Write([]byte(filler))
+	require.NoError(t, err)
+
+	pid, fd := uint32(os.Getpid()), int(w.Fd())
+	key := fdKey(t, w)
+	pipe := newLogPipe()
+	t.Cleanup(pipe.retire)
+	pipe.owners[pid] = []int{fd}
+	tr.logPipes[key] = pipe
+
+	var events []LogEvent
+	for _, line := range []string{"first log\n", "second log\n"} {
+		d, err := tr.openPipeDestination(procFdPath(pid, fd), key)
+		require.NoError(t, err)
+		events = append(events, LogEvent{out: d, logLine: line})
+	}
+	tr.fdCache.Purge()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for _, e := range events {
+			tr.handle(e)
+		}
+	}()
+	t.Cleanup(func() { <-done })
+
+	select {
+	case <-done:
+		t.Fatal("live pipe discarded logs instead of backpressuring its writer")
+	case <-time.After(2 * logPipeDrainTimeout):
+	}
+
+	want := filler + "first log\nsecond log\n"
+	require.NoError(t, r.SetReadDeadline(time.Now().Add(time.Second)))
+	got := make([]byte, len(want))
+	_, err = io.ReadFull(r, got)
+	require.NoError(t, err)
+	require.Equal(t, want, string(got), "queued logs must survive until the live reader resumes")
+}
+
+func TestBlockedLogDestinationDoesNotHoldOtherPipeOpen(t *testing.T) {
+	const backlog = 32
+
+	tr := newTestTracer(t, false)
+	cfg := obi.DefaultConfig
+	tr.cfg = &cfg
+	tr.ctx = t.Context()
+	tr.fdCache = expirable.NewLRU[string, *destFile](2, func(_ string, d *destFile) {
+		d.release()
+	}, time.Minute)
+	t.Cleanup(tr.fdCache.Purge)
+	workerDone := make(chan struct{})
+	tr.asyncWriter = shardedqueue.NewShardedQueue(1, 2*backlog, LogEvent.shardKey, func(_ int, ch <-chan LogEvent) {
+		defer close(workerDone)
+		for e := range ch {
+			tr.handle(e)
+		}
+	})
+	t.Cleanup(func() {
+		tr.asyncWriter.Close()
+		<-workerDone
+	})
+
+	blockedR, blockedW, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = blockedR.Close() })
+	t.Cleanup(func() { _ = blockedW.Close() })
+	capacity, err := unix.FcntlInt(blockedW.Fd(), unix.F_GETPIPE_SZ, 0)
+	require.NoError(t, err)
+	_, err = blockedW.Write([]byte(strings.Repeat("x", capacity)))
+	require.NoError(t, err)
+
+	outR, outW, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = outR.Close() })
+	t.Cleanup(func() { _ = outW.Close() })
+
+	pid := uint32(os.Getpid())
+	tr.trackedPids[pid] = struct{}{}
+	tr.pidPipes[pid] = make(map[int]pipeKey)
+	var blockedFile *os.File
+	for _, f := range []*os.File{blockedW, outW} {
+		fd := int(f.Fd())
+		key := fdKey(t, f)
+		pipe := newLogPipe()
+		pipe.owners[pid] = []int{fd}
+		tr.logPipes[key] = pipe
+		tr.pidPipes[pid][fd] = key
+		event := BpfLogEventT{Tgid: pid, Fd: uint32(fd), Ino: key.Ino, Dev: uint32(key.Dev), DestKind: logDestPipe}
+		// A backlog must share one drain budget, not wait afresh for every line.
+		for range backlog {
+			_, _, err := tr.handleLogEvent(logRecord(event, "final log\n"))
+			require.NoError(t, err)
+		}
+		if f == blockedW {
+			d, ok := tr.fdCache.Get(procFdPath(pid, fd))
+			require.True(t, ok)
+			blockedFile = d.f
+		}
+	}
+	// Retirement must cover in-flight descriptors even after cache eviction.
+	tr.fdCache.Purge()
+	tr.pipesMU.Lock()
+	tr.removePipeFD(pid, int(outW.Fd()), fdKey(t, outW))
+	tr.pipesMU.Unlock()
+	require.NoError(t, outW.Close())
+	require.Empty(t, tr.fdCache.Keys())
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(io.Discard, outR)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(logPipeDrainTimeout + time.Second):
+		t.Fatal("a stalled log destination retained another application's pipe after exit")
+	}
+
+	untrack(tr, pid)
+	require.NoError(t, blockedW.Close())
+	require.EventuallyWithT(t, func(ct *assert.CollectT) {
+		_, err := blockedFile.Stat()
+		assert.ErrorIs(ct, err, os.ErrClosed)
+	}, logPipeDrainTimeout+time.Second, 10*time.Millisecond)
+	require.NoError(t, blockedR.SetReadDeadline(time.Now().Add(time.Second)))
+	data, err := io.ReadAll(blockedR)
+	require.NoError(t, err, "the stalled destination must also release its final writer")
+	require.Equal(t, capacity, len(data), "retirement must interrupt the blocked write")
 }
 
 // exercised under -race: registration, reconcile, and the event hot path

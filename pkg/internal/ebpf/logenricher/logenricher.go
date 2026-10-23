@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 	"unsafe"
 
@@ -48,13 +49,26 @@ type LogEvent struct {
 	out     *destFile // reference owned by this event until its write completes
 }
 
+const logPipeDrainTimeout = time.Second
+
+type logPipe struct {
+	owners map[uint32][]int
+	ctx    context.Context
+	retire context.CancelFunc
+}
+
+func newLogPipe() *logPipe {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &logPipe{owners: make(map[uint32][]int), ctx: ctx, retire: cancel}
+}
+
 // destFile is a refcounted open log destination: the fd cache holds one
-// reference and every in-flight event holds another, so retiring a pipe or
-// evicting the cache entry cannot close a descriptor a queued write still
-// needs
+// reference and every in-flight event holds another. Cache eviction preserves
+// queued writes, pipe retirement bounds their drain time before releasing EOF.
 type destFile struct {
-	f    *os.File
-	refs atomic.Int64
+	f              *os.File
+	refs           atomic.Int64
+	stopRetirement func() bool
 }
 
 // tryAcquire takes a reference unless the descriptor already closed
@@ -72,8 +86,17 @@ func (d *destFile) tryAcquire() bool {
 
 func (d *destFile) release() {
 	if d.refs.Add(-1) == 0 {
+		if d.stopRetirement != nil {
+			d.stopRetirement()
+		}
 		d.f.Close()
 	}
+}
+
+func (d *destFile) retire() {
+	// Close independently of the shard: another live destination may still
+	// backpressure it while this pipe's queued references are withholding EOF.
+	time.AfterFunc(logPipeDrainTimeout, func() { d.f.Close() })
 }
 
 // pipe identity as the BPF map sees it: inode number plus the kernel dev_t of
@@ -99,10 +122,10 @@ type Tracer struct {
 	pids        map[uint64][]uint64       // pid:[]nsPids
 	pidServices map[uint32]*exec.FileInfo // host pid -> file info, for run-time OTel-export check in handle()
 	pidsMU      sync.Mutex
-	trackedPids map[uint32]struct{}          // host pids currently allowed
-	logPipes    map[pipeKey]map[uint32][]int // log pipe -> host pid -> fds (1 and/or 2)
-	pidPipes    map[uint32]map[int]pipeKey   // host pid -> fd -> registered log pipe
-	pipesMU     sync.RWMutex                 // guards trackedPids, logPipes, pidPipes; hot-path readers vs reconcile
+	trackedPids map[uint32]struct{}        // host pids currently allowed
+	logPipes    map[pipeKey]*logPipe       // log pipe -> owners and retirement
+	pidPipes    map[uint32]map[int]pipeKey // host pid -> fd -> registered log pipe
+	pipesMU     sync.RWMutex               // guards trackedPids, logPipes, pidPipes; hot-path readers vs reconcile
 }
 
 func New(cfg *obi.Config, metrics imetrics.Reporter) *Tracer {
@@ -124,7 +147,7 @@ func New(cfg *obi.Config, metrics imetrics.Reporter) *Tracer {
 		pids:        make(map[uint64][]uint64),
 		pidServices: make(map[uint32]*exec.FileInfo),
 		trackedPids: make(map[uint32]struct{}),
-		logPipes:    make(map[pipeKey]map[uint32][]int),
+		logPipes:    make(map[pipeKey]*logPipe),
 		pidPipes:    make(map[uint32]map[int]pipeKey),
 	}
 
@@ -172,6 +195,11 @@ func (p *Tracer) AddCloser(c ...io.Closer) {
 }
 
 func (p *Tracer) Close() error {
+	p.pipesMU.Lock()
+	for _, pipe := range p.logPipes {
+		pipe.retire()
+	}
+	p.pipesMU.Unlock()
 	p.asyncWriter.Close()
 	p.fdCache.Purge()
 	return ebpfcommon.CloseResources(append(p.closers, &p.bpfObjects)...)
@@ -417,8 +445,8 @@ func (p *Tracer) registerLogPipes(pid uint32) {
 // callers must hold pipesMU. On BPF update failure nothing is recorded, so
 // the next reconcile retries instead of leaving the pipe silently unenriched
 func (p *Tracer) addPipeFD(pid uint32, fd int, key pipeKey) {
-	owners := p.logPipes[key]
-	if owners == nil {
+	pipe := p.logPipes[key]
+	if pipe == nil {
 		if p.bpfObjects.LogPipes == nil {
 			p.log.Error("BPF objects not loaded, cannot register log pipe", "ino", key.Ino, "dev", key.Dev)
 			return
@@ -427,10 +455,10 @@ func (p *Tracer) addPipeFD(pid uint32, fd int, key pipeKey) {
 			p.log.Error("error registering log pipe in bpf map", "ino", key.Ino, "dev", key.Dev, "error", err)
 			return
 		}
-		owners = make(map[uint32][]int)
-		p.logPipes[key] = owners
+		pipe = newLogPipe()
+		p.logPipes[key] = pipe
 	}
-	owners[pid] = append(owners[pid], fd)
+	pipe.owners[pid] = append(pipe.owners[pid], fd)
 
 	if p.pidPipes[pid] == nil {
 		p.pidPipes[pid] = make(map[int]pipeKey)
@@ -444,7 +472,11 @@ func (p *Tracer) removePipeFD(pid uint32, fd int, key pipeKey) {
 	// a held write end would rob readers of EOF once the fd is gone
 	p.fdCache.Remove(procFdPath(pid, fd))
 
-	owners := p.logPipes[key]
+	pipe := p.logPipes[key]
+	if pipe == nil {
+		return
+	}
+	owners := pipe.owners
 	if fds, ok := owners[pid]; ok {
 		fds = slices.DeleteFunc(fds, func(f int) bool { return f == fd })
 		if len(fds) > 0 {
@@ -458,6 +490,7 @@ func (p *Tracer) removePipeFD(pid uint32, fd int, key pipeKey) {
 	}
 
 	delete(p.logPipes, key)
+	pipe.retire()
 
 	if p.bpfObjects.LogPipes == nil {
 		return
@@ -496,7 +529,11 @@ func (p *Tracer) pipeDestCandidates(key pipeKey) []string {
 	p.pipesMU.RLock()
 	defer p.pipesMU.RUnlock()
 
-	owners := p.logPipes[key]
+	pipe := p.logPipes[key]
+	if pipe == nil {
+		return nil
+	}
+	owners := pipe.owners
 
 	pids := make([]uint32, 0, len(owners))
 	for pid := range owners {
@@ -638,31 +675,25 @@ func (p *Tracer) handleLogEvent(record *ringbuf.Record) (request.Span, bool, err
 var errStaleDestination = errors.New("destination no longer points at the file the line was written to")
 
 func fileKey(f *os.File) pipeKey {
-	var st unix.Stat_t
-	if err := unix.Fstat(int(f.Fd()), &st); err != nil {
+	// Fd can switch a pollable file back to blocking I/O, preventing Close from
+	// interrupting a write when its pipe retires.
+	info, err := f.Stat()
+	if err != nil {
 		return pipeKey{}
 	}
+	st := info.Sys().(*syscall.Stat_t)
 
 	return pipeKey{Ino: st.Ino, Dev: kernelDev(st.Dev)}
 }
 
-// O_NONBLOCK so a reader-less pipe fails the open with ENXIO instead of
-// blocking the event handler forever; writes revert to blocking so a full
-// pipe backpressures its shard instead of dropping lines. O_NOCTTY so a
-// reopened terminal never becomes OBI's controlling terminal
+// O_NONBLOCK makes reader-less pipes fail with ENXIO. Go's poller still blocks
+// Write on full pipes, preserving shard backpressure, but lets Close interrupt
+// retired destinations. O_NOCTTY so a reopened terminal never becomes OBI's
+// controlling terminal.
 func openDestFile(path string) (*os.File, error) {
 	fd, err := unix.Open(path, unix.O_WRONLY|unix.O_APPEND|unix.O_NONBLOCK|unix.O_CLOEXEC|unix.O_NOCTTY, 0)
 	if err != nil {
 		return nil, &os.PathError{Op: "open", Path: path, Err: err}
-	}
-
-	flags, err := unix.FcntlInt(uintptr(fd), unix.F_GETFL, 0)
-	if err == nil {
-		_, err = unix.FcntlInt(uintptr(fd), unix.F_SETFL, flags&^unix.O_NONBLOCK)
-	}
-	if err != nil {
-		unix.Close(fd)
-		return nil, &os.PathError{Op: "fcntl", Path: path, Err: err}
 	}
 
 	f := os.NewFile(uintptr(fd), path)
@@ -676,8 +707,11 @@ func openDestFile(path string) (*os.File, error) {
 
 // callers must hold pipesMU
 func (p *Tracer) pipeDestinationRegisteredLocked(path string, key pipeKey) bool {
-	owners := p.logPipes[key]
-	for pid, fds := range owners {
+	pipe := p.logPipes[key]
+	if pipe == nil {
+		return false
+	}
+	for pid, fds := range pipe.owners {
 		for _, fd := range fds {
 			if procFdPath(pid, fd) == path {
 				return true
@@ -699,6 +733,12 @@ func (p *Tracer) cacheDestination(path string, d *destFile) {
 func (p *Tracer) cachePipeDestination(path string, key pipeKey, d *destFile) {
 	p.pipesMU.RLock()
 	defer p.pipesMU.RUnlock()
+
+	if pipe := p.logPipes[key]; pipe != nil {
+		d.stopRetirement = context.AfterFunc(pipe.ctx, d.retire)
+	} else {
+		d.retire()
+	}
 
 	if p.pipeDestinationRegisteredLocked(path, key) {
 		p.cacheDestination(path, d)
@@ -772,8 +812,8 @@ func (e LogEvent) shardKey() string {
 }
 
 func (p *Tracer) handle(e LogEvent) {
-	// the event owns a reference taken at capture time, so the destination is
-	// alive here even if its owner exited or the cache evicted it meanwhile
+	// The event owns a capture-time reference; retirement may have closed its
+	// file if the shard could not drain before the pipe's shutdown deadline.
 	defer e.out.release()
 	f := e.out.f
 
@@ -784,7 +824,7 @@ func (p *Tracer) handle(e LogEvent) {
 	if e.orig.Ctx.TraceId == zeroTraceID || e.orig.Ctx.SpanId == zeroSpanID {
 		// No trace context to inject, write original log line
 		_, err := f.Write([]byte(e.logLine))
-		if err != nil {
+		if err != nil && !errors.Is(err, os.ErrClosed) {
 			p.log.Error("failed to write log line", "error", err)
 		}
 		return
@@ -801,7 +841,7 @@ func (p *Tracer) handle(e LogEvent) {
 	}
 
 	_, err = f.Write(out)
-	if err != nil {
+	if err != nil && !errors.Is(err, os.ErrClosed) {
 		p.log.Error("failed to write enriched log line", "error", err)
 	}
 }

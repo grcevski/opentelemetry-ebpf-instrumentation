@@ -55,7 +55,7 @@ func newTestTracer(t *testing.T, exclude bool) *Tracer {
 		pidServices: map[uint32]*exec.FileInfo{},
 		pidsMU:      sync.Mutex{},
 		trackedPids: map[uint32]struct{}{},
-		logPipes:    map[pipeKey]map[uint32][]int{},
+		logPipes:    map[pipeKey]*logPipe{},
 		pidPipes:    map[uint32]map[int]pipeKey{},
 	}
 }
