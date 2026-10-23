@@ -323,6 +323,9 @@ func (i *NodeInjector) injectViaConn(conn net.Conn, closeInspector bool) error {
 		conn.Close()
 		return fmt.Errorf("failed to connect to inspector WebSocket: %w", err)
 	}
+	// An attached session prevents graceful shutdown even when the application
+	// owns the inspector port and we must leave it listening.
+	defer wsConn.Close()
 
 	return i.injectFileWS(wsConn, payload, closeInspector)
 }
