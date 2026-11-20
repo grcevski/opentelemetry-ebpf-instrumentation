@@ -35,7 +35,8 @@ jobs:
           RUST_COMPILER: ${{ matrix.rustc }}
         run: python3 scripts/test-rust-context.py --work-dir "$RUNNER_TEMP/rust-context" --toolchain "$RUST_COMPILER" --protocols --live --container --case rustls-direct-client-0.22 --scenario rustls-direct-client-0.22
       - name: Leave 64 resident bytes at the start of Hyper's buffer
-        run: sed 's/BOUNDARY: usize = 112/BOUNDARY: usize = 64/' scripts/rust-wire-diagnostic-allocator.rs >> internal/test/integration/components/rustcontext/src/main.rs
+        run: |
+          sed 's/BOUNDARY: usize = 112/BOUNDARY: usize = 64/' scripts/rust-wire-diagnostic-allocator.rs >> internal/test/integration/components/rustcontext/src/main.rs
       - name: Verify that a longer request recovers on the same TLS connection
         env:
           OBI_RUST_TEST_DEBUG: "1"
