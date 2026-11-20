@@ -6,7 +6,15 @@ permissions:
   contents: read
   actions: read
 jobs:
+  generate:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: $/.github/actions/generate-bpf
   capture:
+    needs: generate
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 35
     steps:
@@ -24,20 +32,24 @@ jobs:
           name: bpf-generated-44829153041
       - name: Install compiler
         run: rustup toolchain install 1.97.1 --profile minimal
-      - name: Capture original HTTP/1 probe results
+      - name: Reproduce late insertion with a large header
         id: original
         continue-on-error: true
         env:
           OBI_RUST_TEST_DEBUG: "1"
-        run: python3 scripts/test-rust-context.py --work-dir "$RUNNER_TEMP/rust-context" --toolchain 1.97.1 --protocols --live --container --case rustls-direct-client-0.22 --scenario rustls-direct-client-0.22
-      - name: Check initialized fixture allocations
+        run: python3 scripts/test-rust-context.py --work-dir "$RUNNER_TEMP/rust-context" --toolchain 1.97.1 --protocols --live --container --case rustls-client-http1 --scenario rustls-client-http1-large
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: bpf-generated-${{ github.run_id }}
+      - name: Verify HTTP1 insertion with real traffic
         env:
           OBI_RUST_TEST_DEBUG: "1"
-        shell: bash
         run: |
-          set -eu
-          sed -i '/cmd.Env = os.Environ()/a\  cmd.Env = append(cmd.Env, "MALLOC_PERTURB_=165")' pkg/internal/ebpf/generictracer/rust_privileged_test.go
-          python3 scripts/test-rust-context.py --work-dir "$RUNNER_TEMP/rust-context" --toolchain 1.97.1 --protocols --live --container --case rustls-direct-client-0.22 --scenario rustls-direct-client-0.22
+          python3 scripts/test-rust-context.py --work-dir "$RUNNER_TEMP/rust-context" --toolchain 1.97.1 --protocols --live --container --jobs 3 \
+            --case rustls-direct-client-0.22 --case rustls-client-http1 --case rustls-server-0.23 --case latest \
+            --scenario rustls-direct-client-0.22 --scenario rustls-client-http1-large --scenario rustls-client-http1-app-header \
+            --scenario rustls-client-http1-forwarded --scenario rustls-client-http1-forwarded-large --scenario rustls-client-http1-otel-exporter \
+            --scenario rustls-server-http1-trailers --scenario rustls-server-http1-trailers-socket
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
