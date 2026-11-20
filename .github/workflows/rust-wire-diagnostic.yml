@@ -6,17 +6,13 @@ permissions:
   contents: read
   actions: read
 jobs:
-  generate:
-    runs-on: ubuntu-26.04
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          persist-credentials: false
-      - uses: $/.github/actions/generate-bpf
   capture:
-    needs: generate
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 35
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        rustc: ["1.97.1", "1.98.1"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -27,55 +23,29 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           github-token: ${{ github.token }}
-          repository: open-telemetry/opentelemetry-ebpf-instrumentation
-          run-id: 44829153041
-          name: bpf-generated-44829153041
+          run-id: 44837072150
+          name: bpf-generated-44837072150
       - name: Install compiler
-        run: rustup toolchain install 1.97.1 --profile minimal
-      - name: Place the direct client write buffer near an untouched page
-        run: cat scripts/rust-wire-diagnostic-allocator.rs >> internal/test/integration/components/rustcontext/src/main.rs
-      - name: Reproduce the Rustls 0.22 page fault with the original probes
-        id: boundary
-        continue-on-error: true
+        env:
+          RUST_COMPILER: ${{ matrix.rustc }}
+        run: rustup toolchain install "$RUST_COMPILER" --profile minimal
+      - name: Verify the direct client with its normal allocator
         env:
           OBI_RUST_TEST_DEBUG: "1"
-        run: python3 scripts/test-rust-context.py --work-dir "$RUNNER_TEMP/rust-context" --toolchain 1.97.1 --protocols --live --container --case rustls-direct-client-0.22 --scenario rustls-direct-client-0.22
-      - name: Reproduce late insertion with a large header
-        id: original
-        continue-on-error: true
+          RUST_COMPILER: ${{ matrix.rustc }}
+        run: python3 scripts/test-rust-context.py --work-dir "$RUNNER_TEMP/rust-context" --toolchain "$RUST_COMPILER" --protocols --live --container --case rustls-direct-client-0.22 --scenario rustls-direct-client-0.22
+      - name: Leave 64 resident bytes at the start of Hyper's buffer
+        run: sed 's/BOUNDARY: usize = 112/BOUNDARY: usize = 64/' scripts/rust-wire-diagnostic-allocator.rs >> internal/test/integration/components/rustcontext/src/main.rs
+      - name: Verify that a longer request recovers on the same TLS connection
         env:
           OBI_RUST_TEST_DEBUG: "1"
-        run: python3 scripts/test-rust-context.py --work-dir "$RUNNER_TEMP/rust-context" --toolchain 1.97.1 --protocols --live --container --case rustls-client-http1 --scenario rustls-client-http1-large
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
-        with:
-          name: bpf-generated-${{ github.run_id }}
-      - name: Verify the same Rustls 0.22 page placement with the new probes
-        env:
-          OBI_RUST_TEST_DEBUG: "1"
-        run: python3 scripts/test-rust-context.py --work-dir "$RUNNER_TEMP/rust-context" --toolchain 1.97.1 --protocols --live --container --case rustls-direct-client-0.22 --scenario rustls-direct-client-0.22
-      - name: Restore the normal allocator
-        run: git restore -- internal/test/integration/components/rustcontext/src/main.rs
-      - name: Verify HTTP1 insertion with real traffic
-        env:
-          OBI_RUST_TEST_DEBUG: "1"
+          RUST_COMPILER: ${{ matrix.rustc }}
         run: |
-          python3 scripts/test-rust-context.py --work-dir "$RUNNER_TEMP/rust-context" --toolchain 1.97.1 --protocols --live --container --jobs 3 \
-            --case rustls-direct-client-0.22 --case rustls-client-http1 --case rustls-server-0.23 --case latest \
-            --scenario rustls-direct-client-0.22 --scenario rustls-client-http1-large --scenario rustls-client-http1-app-header \
-            --scenario rustls-client-http1-forwarded --scenario rustls-client-http1-forwarded-large --scenario rustls-client-http1-otel-exporter \
-            --scenario latest-owned-http1 --scenario latest-socket-http1 --scenario latest-forwarded-http1-socket \
-            --scenario rustls-server-http1-trailers --scenario rustls-server-http1-trailers-socket
+          python3 scripts/test-rust-context.py --work-dir "$RUNNER_TEMP/rust-context" --toolchain "$RUST_COMPILER" --protocols --live --container --case rustls-direct-client-0.22 --scenario rustls-direct-client-0.22
+          grep -h -m1 'rust h1 append dst=.*err=-14' "$RUNNER_TEMP"/rust-context/evidence/"$RUST_COMPILER"/*/*.log
+          grep -h -m1 'wire injection skipped 1/10 requests' "$RUNNER_TEMP"/rust-context/evidence/"$RUST_COMPILER"/*/*.log
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
-          name: rust-http1-probe-evidence
+          name: rust-wire-cold-${{ matrix.rustc }}
           path: ${{ runner.temp }}/rust-context/evidence/
-      - name: Report original outcome
-        if: always()
-        env:
-          ORIGINAL: ${{ steps.original.outcome }}
-          BOUNDARY: ${{ steps.boundary.outcome }}
-        run: |
-          echo "Original wire test results (page placement $BOUNDARY, large headers $ORIGINAL)"
-          test "$BOUNDARY" = failure
-          test "$ORIGINAL" = failure

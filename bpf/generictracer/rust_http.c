@@ -109,7 +109,7 @@ static __always_inline bool rust_http1_append(
     if (!header || !rust_read_u64(vector, config->vec_cap, &cap) ||
         len > TRACE_BUF_SIZE - TP_SIZE || cap > k_rust_max_buffer || cap < len ||
         (cap - len) < TP_SIZE || (ptr + cap) < ptr) {
-        bpf_dbg_printk("rust h1 buffer rejected buffer=%llx len=%llu cap=%llu", vector, len, cap);
+        bpf_dbg_printk("rust http1 buffer rejected buffer=%llx len=%llu cap=%llu", vector, len, cap);
         return false;
     }
 
@@ -122,7 +122,7 @@ static __always_inline bool rust_http1_append(
     const long result = bpf_probe_write_user((void *)dest, header, TP_SIZE);
 
     if (result != 0) {
-        bpf_dbg_printk("rust h1 append dst=%llx len=%u err=%ld", dest, (u32)TP_SIZE, result);
+        bpf_dbg_printk("rust http1 append dst=%llx len=%u err=%ld", dest, (u32)TP_SIZE, result);
         return false;
     }
 
@@ -130,7 +130,7 @@ static __always_inline bool rust_http1_append(
     const long commit =
         bpf_probe_write_user((void *)(vector + config->vec_len), &new_len, sizeof(new_len));
     if (commit != 0) {
-        bpf_dbg_printk("rust h1 length commit failed err=%ld", commit);
+        bpf_dbg_printk("rust http1 length commit failed err=%ld", commit);
         return false;
     }
 
@@ -184,8 +184,8 @@ static __always_inline void rust_http1_entry(u64 id, u64 vector, u64 headers) {
     bpf_map_update_elem(&rust_http_args, &id, args, BPF_ANY);
 }
 
-// Snapshots the task context and HeaderMap before Hyper's standard/title-case
-// formatters run, and try insertion before Hyper writes the application headers.
+// Snapshot the task context and HeaderMap and try insertion before Hyper's
+// standard and title-case formatters write the application headers.
 SEC("uprobe/rust:http1_headers")
 int GUARDED_PROG(obi_rust_http1_headers, struct pt_regs *, ctx) {
     rust_http1_entry(bpf_get_current_pid_tgid(), PT_REGS_PARM2(ctx), PT_REGS_PARM1(ctx));
