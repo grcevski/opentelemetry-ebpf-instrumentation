@@ -845,6 +845,7 @@ func FixupSpec(spec *ebpf.CollectionSpec, overrideKernelVersion bool) {
 		for _, name := range []string{
 			"obi_continue_protocol_http", "obi_handle_buf_with_args",
 			"obi_uprobe_writeSubset_returns",
+			"obi_rust_http1_headers_ret",
 			"obi_protocol_http2_grpc_handle_start_frame_server",
 			"obi_protocol_http2_grpc_handle_start_frame_server_finalize",
 		} {
@@ -899,6 +900,7 @@ func FixupSpec(spec *ebpf.CollectionSpec, overrideKernelVersion bool) {
 	for _, name := range []string{
 		"obi_continue_protocol_http_legacy", "obi_handle_buf_with_args_legacy",
 		"obi_uprobe_writeSubset_returns_legacy",
+		"obi_rust_http1_headers_ret_legacy",
 		"obi_protocol_http2_grpc_handle_start_frame_server_legacy",
 		"obi_protocol_http2_grpc_handle_start_frame_server_finalize_legacy",
 	} {

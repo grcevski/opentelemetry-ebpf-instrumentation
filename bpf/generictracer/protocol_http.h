@@ -1053,12 +1053,31 @@ static __always_inline int __obi_continue_protocol_http(struct pt_regs *ctx,
         set_trace_info_for_connection(&args->pid_conn.conn, TRACE_TYPE_CLIENT, tp_p);
         // clean up so that TC does not pick it up
         bpf_map_delete_elem(&outgoing_trace_map, &e_key);
+        // A Rust request's parent can be a spawned task's inherited context.
+        const rust_http_request_t *rust = rust_current_request(bpf_get_current_pid_tgid());
+        if (rust && rust->parent.valid) {
+            info->parent_status = parent_kind(&rust->parent);
+        }
+        rust_observe_request(bpf_get_current_pid_tgid());
         goto skip_tp;
     }
 
     tp_p = (tp_info_pid_t *)tp_info_mem();
 
     if (!tp_p) {
+        goto skip_tp;
+    }
+
+    rust_http_request_t *rust = meta && meta->type == k_event_type_http_client
+                                    ? rust_current_request(bpf_get_current_pid_tgid())
+                                    : NULL;
+    // Rust has already checked the serialized header, which can exceed the capture buffer.
+    if (rust_request_has_wire_context(rust)) {
+        rust_socket_trace(rust, args->pid_conn.pid, tp_p);
+        info->parent_status =
+            rust->parent.valid ? parent_kind(&rust->parent) : k_parent_status_none;
+        commit_http_tp(args, meta, tp_p);
+        rust->observed = 1;
         goto skip_tp;
     }
 
@@ -1076,6 +1095,9 @@ static __always_inline int __obi_continue_protocol_http(struct pt_regs *ctx,
 
     if (meta) {
         if (meta->type == k_event_type_http_client) {
+            if (rust) {
+                rust->observed = 1;
+            }
             pid_connection_info_t p_conn = {.pid = args->pid_conn.pid};
             __builtin_memcpy(&p_conn.conn, &args->pid_conn.conn, sizeof(connection_info_t));
             found_tp = find_trace_for_client_request(

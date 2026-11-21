@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"sync"
 
 	"github.com/cilium/ebpf"
@@ -42,6 +43,7 @@ type rustController struct {
 type rustAttachment struct {
 	links             []io.Closer
 	capabilities      BpfRustCapabilitiesT
+	protocol          *BpfRustProtocolConfigT
 	expectedStartTime uint64
 }
 
@@ -106,12 +108,13 @@ func (c *rustController) commit(pid app.PID, target *rustTarget, attachment rust
 
 	if err := c.publish(pid, attachment); err != nil {
 		_ = c.tracer.bpfObjects.RustCapabilities.Delete(uint32(pid))
+		_ = c.tracer.bpfObjects.RustProtocolConfigs.Delete(uint32(pid))
 		closeRustLinks(attachment.links)
 		cause = errors.Join(cause, err)
 	} else {
 		target.links = attachment.links
-		if attachment.capabilities.TaskContext != 0 {
-			c.tracer.log.Info("Enabled Tokio task tracking", "pid", pid)
+		if attachment.protocol != nil {
+			c.logPublished(pid, attachment)
 		}
 	}
 
@@ -123,16 +126,29 @@ func (c *rustController) commit(pid app.PID, target *rustTarget, attachment rust
 }
 
 func (c *rustController) publish(pid app.PID, attachment rustAttachment) error {
-	if attachment.capabilities.TaskContext == 0 {
+	if attachment.protocol == nil {
 		return nil
 	}
 
 	objects := &c.tracer.bpfObjects
+	if err := objects.RustProtocolConfigs.Put(uint32(pid), *attachment.protocol); err != nil {
+		return err
+	}
+
 	if err := checkRustLifecycle(pid, attachment.expectedStartTime); err != nil {
 		return err
 	}
 
 	return objects.RustCapabilities.Put(uint32(pid), attachment.capabilities)
+}
+
+func (c *rustController) logPublished(pid app.PID, attachment rustAttachment) {
+	capabilities := attachment.capabilities
+	protocol := attachment.protocol
+
+	c.tracer.log.Info("Enabled Rust instrumentation", "pid", pid, "tokio", capabilities.TokioRuntime != 0,
+		"task_context", capabilities.TaskContext != 0, "client_context", capabilities.ClientContext != 0,
+		"http1", protocol.Http1 != 0)
 }
 
 func closeRustLinks(links []io.Closer) {
@@ -160,14 +176,19 @@ func (c *rustController) attach(pid app.PID, fi *exec.FileInfo) (rustAttachment,
 
 	defer target.Close()
 
-	// Replicas and forked workers of one binary reuse its compiler and symbol analysis.
+	// Replicas and forked workers of one binary reuse its symbol and layout analysis.
 	executable := analyzeRustExecutable(c.executables, target)
-	if executable.err != nil {
+	if executable.protocol == nil {
 		return rustAttachment{}, executable.err
 	}
 
+	if executable.err != nil {
+		c.tracer.log.Debug("Partial Rust protocol layout support", "pid", pid, "error", executable.err)
+	}
+
 	probes := executable.probes
-	groups := planRustProbes(probes)
+	protocol := *executable.protocol
+	groups := planRustProbes(probes, protocol)
 	path := fmt.Sprintf("/proc/self/fd/%d", target.Fd())
 
 	exe, err := link.OpenExecutable(path)
@@ -196,7 +217,26 @@ func (c *rustController) attach(pid app.PID, fi *exec.FileInfo) (rustAttachment,
 		{rustTaskSchedule, objects.ObiRustTaskSchedule, false},
 		{rustTaskScheduleLocal, objects.ObiRustTaskScheduleLocal, false},
 
+		{rustHyperFindBlock, objects.ObiRustHyperFindBlockRet, true},
+		{rustHyperFindBlock, objects.ObiRustHyperFindBlock, false},
+		{rustHyperPop, objects.ObiRustHyperPopRet, true},
+		{rustHyperPop, objects.ObiRustHyperPop, false},
+		{rustHyperSend, objects.ObiRustHyperSend, false},
+		{rustHyperRequestSend, objects.ObiRustHyperRequestSend, false},
+		{rustHyperRequestReceive, objects.ObiRustHyperRequestReceiveRet, true},
+		{rustHyperRequestReceive, objects.ObiRustHyperReceive, false},
+		{rustHyperClear, objects.ObiRustHyperClear, false},
+		{rustHyperChanSend, objects.ObiRustHyperSend, false},
+		{rustHyperReceive, objects.ObiRustHyperReceiveRet, true},
+		{rustHyperReceive, objects.ObiRustHyperReceive, false},
 		{rustTaskDealloc, objects.ObiRustTaskDealloc, false},
+		{rustHyperEnqueue, objects.ObiRustHyperEnqueue, false},
+		{rustHyperDequeue, objects.ObiRustHyperDequeue, false},
+
+		{rustHTTP1Headers, objects.ObiRustHttp1HeadersRet, true},
+		{rustHTTP1Headers, objects.ObiRustHttp1Headers, false},
+		{rustHTTP1HeadersOriginal, objects.ObiRustHttp1HeadersRet, true},
+		{rustHTTP1HeadersOriginal, objects.ObiRustHttp1HeadersOriginal, false},
 
 		{rustTaskPoll, objects.ObiRustTaskPoll, false},
 	}
@@ -222,6 +262,10 @@ func (c *rustController) attach(pid app.PID, fi *exec.FileInfo) (rustAttachment,
 	}
 
 	links, features, attachErr := attachRustGroups(groups, attachAlternative)
+	cleared, clearFeatures, clearErr := attachRustGroups(planRustChannelClears(probes, features), attachAlternative)
+	links = append(links, cleared...)
+	maps.Copy(features, clearFeatures)
+	attachErr = errors.Join(attachErr, clearErr)
 
 	if attachErr != nil {
 		c.tracer.log.Debug("Partial Rust probe attachment", "pid", pid, "error", attachErr)
@@ -234,19 +278,38 @@ func (c *rustController) attach(pid app.PID, fi *exec.FileInfo) (rustAttachment,
 
 	if features["task-poll"] && (features["task-create"] || features["task-dealloc"]) {
 		capabilities.TaskContext = 1
-		if !probes.hasHyper {
+		complete := !probes.hasHyper || len(probes.channels) > 0
+		supported := !probes.hasHyper
+
+		for _, channel := range probes.channels {
+			complete = complete && (features["channel:"+channel] || features["channel-clear:"+channel])
+			supported = supported || features["channel:"+channel]
+		}
+
+		if complete && supported {
 			capabilities.ClientContext = 1
 		}
 	}
 
+	if !features["http1"] {
+		protocol.Http1 = 0
+	}
+
 	if capabilities.TaskContext == 0 {
 		closeRustLinks(links)
-		return rustAttachment{}, errors.Join(errors.New("no usable Tokio task probes"), attachErr)
+		return rustAttachment{}, errors.Join(errors.New("no usable Rust runtime or protocol probes"), attachErr)
+	}
+
+	// The formatter identifies the outgoing request even if its queue handoff was
+	// inlined. In that case Rust and the socket injector share a fresh root.
+	if protocol.Http1 != 0 && c.tracer.cfg.EBPF.ContextPropagation.HasHeaders() {
+		protocol.Inject = 1
 	}
 
 	return rustAttachment{
 		links:             links,
 		capabilities:      capabilities,
+		protocol:          &protocol,
 		expectedStartTime: expectedStartTime,
 	}, nil
 }
@@ -277,6 +340,10 @@ func (c *rustController) block(pid app.PID, fi *exec.FileInfo) {
 func (c *rustController) remove(pid app.PID) {
 	if c.tracer.bpfObjects.RustCapabilities != nil {
 		_ = c.tracer.bpfObjects.RustCapabilities.Delete(uint32(pid))
+	}
+
+	if c.tracer.bpfObjects.RustProtocolConfigs != nil {
+		_ = c.tracer.bpfObjects.RustProtocolConfigs.Delete(uint32(pid))
 	}
 
 	for _, closer := range c.targets[pid].links {

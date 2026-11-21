@@ -25,6 +25,7 @@
 #include <maps/fd_to_connection.h>
 #include <maps/node_manual_ctx_shadow.h>
 #include <maps/nodejs_fd_map.h>
+#include <maps/rust_protocol.h>
 
 #include <pid/pid.h>
 

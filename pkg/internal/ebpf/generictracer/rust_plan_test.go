@@ -11,11 +11,44 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"go.opentelemetry.io/obi/internal/rustexec"
 )
 
 type rustTestLink struct{ closed bool }
 
 func (l *rustTestLink) Close() error { l.closed = true; return nil }
+
+func TestRustAttachmentAlternatives(t *testing.T) {
+	stable, failed, fallback := &rustTestLink{}, &rustTestLink{}, &rustTestLink{}
+	groups := []rustProbeGroup{
+		{name: "tasks", feature: "task", alternatives: []rustProbeAlternative{{rustTaskPoll: {1}}}},
+		{name: "channel", feature: "channel", alternatives: []rustProbeAlternative{{rustHyperEnqueue: {2}}, {rustHyperSend: {3}}, {rustHyperFindBlock: {4}}}},
+		{name: "missing HTTP/1 hook", feature: "http1", alternatives: []rustProbeAlternative{{rustHTTP1Headers: {5}}}},
+	}
+	links, enabled, err := attachRustGroups(groups, func(alternative rustProbeAlternative) ([]io.Closer, error) {
+		switch {
+		case len(alternative[rustTaskPoll]) > 0:
+			return []io.Closer{stable}, nil
+		case len(alternative[rustHyperEnqueue]) > 0:
+			return []io.Closer{failed}, errors.New("inlined or unavailable")
+		case len(alternative[rustHyperSend]) > 0:
+			return nil, errors.New("attach rejected")
+		case len(alternative[rustHyperFindBlock]) > 0:
+			return []io.Closer{fallback}, nil
+		default:
+			return nil, errors.New("unavailable")
+		}
+	})
+	require.ErrorContains(t, err, "missing HTTP/1 hook")
+	require.True(t, enabled["task"])
+	require.True(t, enabled["channel"])
+	require.False(t, enabled["http1"])
+	require.True(t, failed.closed)
+	require.False(t, stable.closed)
+	require.False(t, fallback.closed)
+	require.Len(t, links, 2)
+}
 
 func TestRustPublicSpawnFallback(t *testing.T) {
 	for name, runtimeSpawn := range map[string]bool{"missing runtime spawn": false, "runtime attachment fails": true} {
@@ -28,7 +61,7 @@ func TestRustPublicSpawnFallback(t *testing.T) {
 				symbols.addresses[rustTaskSpawn] = []uint64{3}
 			}
 
-			groups := planRustProbes(symbols)
+			groups := planRustProbes(symbols, BpfRustProtocolConfigT{})
 			require.Len(t, groups, 1)
 			_, features, err := attachRustGroups(groups, func(alternative rustProbeAlternative) ([]io.Closer, error) {
 				if len(alternative[rustTaskSpawn]) > 0 {
@@ -43,4 +76,53 @@ func TestRustPublicSpawnFallback(t *testing.T) {
 			require.True(t, features["task-create"])
 		})
 	}
+}
+
+func TestRustChannelTriesEveryAlternative(t *testing.T) {
+	const channel = "hyper::client::dispatch::Envelope<T>"
+	addresses := map[rustProbeKind][]uint64{}
+	for _, kind := range []rustProbeKind{
+		rustHyperEnqueue, rustHyperDequeue, rustHyperChanSend, rustHyperSend, rustHyperReceive,
+		rustHyperFindBlock, rustHyperPop, rustHyperRequestSend,
+	} {
+		addresses[kind] = []uint64{uint64(kind) + 1}
+	}
+
+	symbols := rustProbeSymbols{
+		channels:      []string{channel},
+		channelProbes: map[string]map[rustProbeKind][]uint64{channel: addresses},
+	}
+	config := BpfRustProtocolConfigT{
+		Message: rustexec.MessageCallback | rustexec.MessageList | rustexec.MessageRequest,
+	}
+	groups := planRustProbes(symbols, config)
+	require.Len(t, groups, 1)
+	require.Len(t, groups[0].alternatives, 5)
+
+	// Only the last alternative attaches, so every earlier one must have been tried.
+	_, features, err := attachRustGroups(groups, func(alternative rustProbeAlternative) ([]io.Closer, error) {
+		if len(alternative[rustHyperRequestSend]) == 0 {
+			return nil, errors.New("inlined or unavailable")
+		}
+		return nil, nil
+	})
+
+	require.NoError(t, err)
+	require.True(t, features["channel:"+channel])
+}
+
+func TestRustPartialProbePlan(t *testing.T) {
+	var symbols rustProbeSymbols
+	for _, kind := range []rustProbeKind{rustTaskHarnessPoll, rustTaskBind, rustHTTP1Headers} {
+		symbols.addresses[kind] = []uint64{uint64(kind) + 1}
+	}
+	groups := planRustProbes(symbols, BpfRustProtocolConfigT{Http1: 1})
+	names := map[string]bool{}
+	for _, group := range groups {
+		names[group.feature] = true
+	}
+	require.True(t, names["task-poll"], "Harness polling replaces an inlined raw poll")
+	require.True(t, names["task-create"])
+	require.True(t, names["http1"])
+	require.False(t, names["h2-send"])
 }

@@ -32,18 +32,32 @@ const (
 	rustTaskPublish
 	rustTaskHarnessPoll
 	rustTaskHarnessDealloc
+	rustHyperEnqueue
+	rustHyperDequeue
+	rustHyperSend
+	rustHyperChanSend
+	rustHyperReceive
+	rustHyperFindBlock
+	rustHyperRequestSend
+	rustHyperRequestReceive
+	rustHyperClear
+	rustHyperPop
+	rustHTTP1Headers
+	rustHTTP1HeadersOriginal
 	rustProbeCount
 )
 
 type rustProbeSymbols struct {
-	addresses [rustProbeCount][]uint64
-	hasHyper  bool
-	hasTokio  bool
+	addresses     [rustProbeCount][]uint64
+	channels      []string
+	channelProbes map[string]map[rustProbeKind][]uint64
+	hasHyper      bool
+	hasTokio      bool
 }
 
 func resolveRustProbes(f *elf.File) (rustProbeSymbols, error) {
-	var probes rustProbeSymbols
-	matches := map[string]rustProbeKind{}
+	probes := rustProbeSymbols{channelProbes: map[string]map[rustProbeKind][]uint64{}}
+
 	if f.Class != elf.ELFCLASS64 || f.Data != elf.ELFDATA2LSB ||
 		(f.Machine != elf.EM_X86_64 || runtime.GOARCH != "amd64") &&
 			(f.Machine != elf.EM_AARCH64 || runtime.GOARCH != "arm64") {
@@ -52,6 +66,13 @@ func resolveRustProbes(f *elf.File) (rustProbeSymbols, error) {
 
 	hasHyper := false
 	hasTokio := false
+	channelTypes := map[string]struct{}{}
+	// Demangling dominates the scan, so each match keeps what its name decoded to.
+	type rustSymbolMatch struct {
+		kind     rustProbeKind
+		envelope string
+	}
+	matches := map[string]rustSymbolMatch{}
 
 	syms, err := procs.FindExeSymbolsMatching(f, func(name string) bool {
 		if !strings.HasPrefix(name, "_R") && !strings.HasPrefix(name, "_ZN") {
@@ -80,19 +101,41 @@ func resolveRustProbes(f *elf.File) (rustProbeSymbols, error) {
 			return false
 		}
 
+		match := rustSymbolMatch{kind: kind}
+		if kind >= rustHyperEnqueue && kind <= rustHyperPop {
+			match.envelope = rustHyperEnvelope(decoded)
+			if match.envelope != "" {
+				channelTypes[match.envelope] = struct{}{}
+			}
+		}
+
 		// The callback's names alias an ELF mapping that closes after the scan.
-		matches[strings.Clone(name)] = kind
+		matches[strings.Clone(name)] = match
 		return true
 	})
 	if err != nil {
 		return probes, err
 	}
 
+	for name := range channelTypes {
+		probes.channels = append(probes.channels, name)
+	}
+
 	probes.hasHyper = hasHyper
 	probes.hasTokio = hasTokio
 
 	for name, sym := range syms {
-		kind := matches[name]
+		match := matches[name]
+		kind := match.kind
+		if kind >= rustHyperEnqueue && kind <= rustHyperPop {
+			envelope := match.envelope
+			if probes.channelProbes[envelope] == nil {
+				probes.channelProbes[envelope] = map[rustProbeKind][]uint64{}
+			}
+
+			probes.channelProbes[envelope][kind] = append(probes.channelProbes[envelope][kind], sym.Off)
+		}
+
 		probes.addresses[kind] = append(probes.addresses[kind], sym.Off)
 	}
 
@@ -102,13 +145,53 @@ func resolveRustProbes(f *elf.File) (rustProbeSymbols, error) {
 	}
 
 	if len(syms) == 0 {
-		return rustProbeSymbols{}, errors.New("no supported Tokio task symbols found")
+		return rustProbeSymbols{}, errors.New("no supported Rust runtime or protocol symbols found")
 	}
 
+	slices.Sort(probes.channels)
 	return probes, nil
 }
 
+func rustHyperEnvelope(name string) string {
+	prefix := "hyper::client::dispatch::Envelope<"
+	start := strings.Index(name, prefix)
+
+	if start < 0 {
+		for _, candidate := range []string{"hyper::client::dispatch::Sender<", "hyper::client::dispatch::UnboundedSender<"} {
+			if position := strings.Index(name, candidate); position >= 0 {
+				prefix, start = candidate, position
+				break
+			}
+		}
+
+		if start < 0 {
+			return ""
+		}
+	}
+
+	depth := 1
+	for i := start + len(prefix); i < len(name); i++ {
+		switch name[i] {
+		case '<':
+			depth++
+		case '>':
+			depth--
+			if depth == 0 {
+				return "hyper::client::dispatch::Envelope<" + name[start+len(prefix):i] + ">"
+			}
+		}
+	}
+
+	return ""
+}
+
 func rustSymbolKind(name string) (rustProbeKind, bool) {
+	if (strings.HasPrefix(name, "<hyper::client::dispatch::Sender<http::request::Request<") ||
+		strings.HasPrefix(name, "<hyper::client::dispatch::UnboundedSender<http::request::Request<")) &&
+		(strings.HasSuffix(name, ">::send") || strings.HasSuffix(name, ">::try_send")) {
+		return rustHyperRequestSend, true
+	}
+
 	if name == "<tokio::runtime::scheduler::multi_thread::handle::Handle>::schedule_option_task_without_yield" {
 		return rustTaskPublish, true
 	}
@@ -152,8 +235,37 @@ func rustSymbolKind(name string) (rustProbeKind, bool) {
 		return rustTaskScheduleLocal, true
 	}
 
+	if strings.HasPrefix(name, "<tokio::sync::mpsc::list::Tx<hyper::client::dispatch::Envelope<") && strings.HasSuffix(name, ">::find_block") {
+		return rustHyperFindBlock, true
+	}
+
+	if strings.HasPrefix(name, "<tokio::sync::mpsc::list::Rx<hyper::client::dispatch::Envelope<") && strings.HasSuffix(name, ">::pop") {
+		return rustHyperPop, true
+	}
+
 	if strings.HasPrefix(name, "<tokio::runtime::task::list::OwnedTasks<") && strings.HasSuffix(name, ">::bind_inner") {
 		return rustTaskBind, true
+	}
+
+	if strings.HasPrefix(name, "<tokio::sync::mpsc::list::Tx<hyper::client::dispatch::Envelope<") && strings.HasSuffix(name, ">::push") {
+		return rustHyperSend, true
+	}
+
+	if strings.HasPrefix(name, "<tokio::sync::mpsc::chan::Tx<hyper::client::dispatch::Envelope<") && strings.HasSuffix(name, ">::send") {
+		return rustHyperChanSend, true
+	}
+
+	if strings.HasPrefix(name, "<tokio::sync::mpsc::chan::Rx<hyper::client::dispatch::Envelope<") && strings.HasSuffix(name, ">::recv") {
+		return rustHyperReceive, true
+	}
+
+	if strings.HasPrefix(name, "hyper::proto::h1::role::") {
+		switch name {
+		case "hyper::proto::h1::role::write_headers", "hyper::proto::h1::role::write_headers_title_case":
+			return rustHTTP1Headers, true
+		case "hyper::proto::h1::role::write_headers_original_case":
+			return rustHTTP1HeadersOriginal, true
+		}
 	}
 
 	if strings.HasPrefix(name, "tokio::runtime::task::raw::poll::<") || name == "tokio::runtime::task::raw::poll" {
@@ -168,5 +280,31 @@ func rustSymbolKind(name string) (rustProbeKind, bool) {
 		return rustTaskNew, true
 	}
 
+	// Only Hyper request envelopes have the large, indirectly passed ABI used
+	// by the probes. Matching just Block<T> would also attach to unrelated queues.
+	if strings.HasPrefix(name, "<tokio::sync::mpsc::block::Block<hyper::client::dispatch::Envelope<") {
+		if strings.HasSuffix(name, ">::write::{closure#0}") {
+			return rustHyperEnqueue, true
+		}
+
+		if strings.HasSuffix(name, ">::read::{closure#0}") {
+			return rustHyperDequeue, true
+		}
+	}
+
 	return 0, false
+}
+
+func (p rustProbeSymbols) layoutChannels() []string {
+	var channels []string
+	for _, name := range p.channels {
+		for _, kind := range []rustProbeKind{rustHyperEnqueue, rustHyperSend, rustHyperChanSend, rustHyperFindBlock, rustHyperRequestSend} {
+			if len(p.channelProbes[name][kind]) > 0 {
+				channels = append(channels, name)
+				break
+			}
+		}
+	}
+
+	return channels
 }

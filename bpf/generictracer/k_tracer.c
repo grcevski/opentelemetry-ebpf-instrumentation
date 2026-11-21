@@ -55,6 +55,7 @@
 #include <maps/fd_to_connection.h>
 #include <maps/msg_buffers.h>
 #include <maps/node_manual_ctx_shadow.h>
+#include <maps/rust_protocol.h>
 #include <maps/rust_tasks.h>
 #include <maps/sock_pids.h>
 #include <maps/unreadable_buffer_ports.h>

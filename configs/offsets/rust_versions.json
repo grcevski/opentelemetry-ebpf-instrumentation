@@ -5,5 +5,91 @@
     "1.99.0",
     "1.99.1",
     "1.100.0"
+  ],
+  "targets": [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu"
+  ],
+  "cases": [
+    {
+      "name": "latest",
+      "tokio": "1.54.1",
+      "reqwest": "0.13.5",
+      "hyper": "1.12.0",
+      "features": "",
+      "env": {}
+    },
+    {
+      "name": "tokio-1.53",
+      "tokio": "1.53.3",
+      "reqwest": "0.13.5",
+      "hyper": "1.12.0",
+      "features": "",
+      "env": {}
+    },
+    {
+      "name": "tokio-1.52",
+      "tokio": "1.52.4",
+      "reqwest": "0.13.5",
+      "hyper": "1.12.0",
+      "features": "",
+      "env": {}
+    },
+    {
+      "name": "tokio-1.51",
+      "tokio": "1.51.6",
+      "reqwest": "0.13.5",
+      "hyper": "1.12.0",
+      "features": "",
+      "env": {}
+    },
+    {
+      "name": "reqwest-0.12",
+      "tokio": "1.54.1",
+      "reqwest": "0.12.28",
+      "hyper": "1.12.0",
+      "features": "",
+      "env": {}
+    },
+    {
+      "name": "reqwest-0.11",
+      "tokio": "1.54.1",
+      "reqwest": "0.11.27",
+      "hyper": null,
+      "features": "",
+      "env": {}
+    },
+    {
+      "name": "reqwest-0.10",
+      "tokio": "1.54.1",
+      "reqwest": "0.10.10",
+      "hyper": null,
+      "features": "reqwest_010",
+      "env": {}
+    },
+    {
+      "name": "hyper-1.11",
+      "tokio": "1.54.1",
+      "reqwest": "0.13.5",
+      "hyper": "1.11.1",
+      "features": "",
+      "env": {}
+    },
+    {
+      "name": "hyper-1.10",
+      "tokio": "1.54.1",
+      "reqwest": "0.13.5",
+      "hyper": "1.10.1",
+      "features": "",
+      "env": {}
+    },
+    {
+      "name": "hyper-1.9",
+      "tokio": "1.54.1",
+      "reqwest": "0.13.5",
+      "hyper": "1.9.0",
+      "features": "",
+      "env": {}
+    }
   ]
 }

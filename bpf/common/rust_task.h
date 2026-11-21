@@ -6,14 +6,17 @@
 #include <bpfcore/utils.h>
 #include <common/event_defs.h>
 #include <common/runtime.h>
+#include <common/scratch_mem.h>
 #include <common/trace_key.h>
 #include <logger/bpf_dbg.h>
 
+#include <maps/rust_protocol.h>
 #include <maps/rust_tasks.h>
 #include <maps/server_traces.h>
 #include <pid/pid.h>
 
 /*
+ * Context bridge functions between Rust runtime uprobes, generic protocol capture, and the tpinjector.
  * Tokio tasks can move between workers, and one worker can poll unrelated requests,
  * so an OS thread ID alone cannot identify the request that caused an operation.
  *
@@ -22,7 +25,14 @@
  * `id` is bpf_get_current_pid_tgid(). Shared address keys include the PID so
  * identical virtual addresses in different processes remain independent.
  *
+ * Server capture installs a task context. Spawn and Hyper queue probes snapshot this context
+ * before an async handoff, while receivers restore it on the task handling that work.
+ * Missing snapshots clear the driver's old parent instead of borrowing another request's.
+ * Client ownership and wire-parent records connect that context to socket injection
+ * and to the client span subsequently created by generic capture.
  */
+
+SCRATCH_MEM_TYPED(rust_wire_key, rust_wire_key_t)
 
 static __always_inline bool rust_process_instrumented(u64 id) {
     const u32 pid = obi_pid(id);
@@ -41,6 +51,13 @@ static __always_inline bool rust_task_context_enabled(u64 id) {
     const rust_capabilities_t *capabilities = rust_process_capabilities(obi_pid(id));
 
     return capabilities && capabilities->task_context;
+}
+
+// Reports whether Rust client request handoff tracking is enabled for the process.
+static __always_inline bool rust_client_context_enabled(u64 id) {
+    const rust_capabilities_t *capabilities = rust_process_capabilities(obi_pid(id));
+
+    return capabilities && capabilities->client_context;
 }
 
 // Returns the poll state of a thread that has polled a Tokio task, or NULL for a plain
@@ -185,5 +202,104 @@ static __always_inline void rust_inherit_task_context(u64 id, const rust_task_ke
     tp_info_pid_t *inherited = bpf_map_lookup_elem(&rust_task_context, key);
     if (inherited && inherited->valid) {
         inherited->response_sent = 1;
+    }
+}
+
+// Restores a queued channel context onto the receiving task and consumes the queue entry.
+// A missing entry clears the receiver's previous context.
+static __always_inline void rust_adopt_channel_context(u64 id, const rust_task_key_t *key) {
+    tp_info_pid_t context = {};
+    const tp_info_pid_t *queued = bpf_map_lookup_elem(&rust_channel_context, key);
+
+    if (queued) {
+        context = *queued;
+        bpf_dbg_printk("rust handoff key=%llx valid=%u", key->addr, context.valid);
+    } else {
+        bpf_dbg_printk("rust handoff missing key=%llx pid=%u", key->addr, key->pid);
+    }
+
+    rust_set_context(id, &context);
+    bpf_map_delete_elem(&rust_channel_context, key);
+}
+
+// Returns the process's validated ABI offsets and independently enabled protocol capabilities.
+static __always_inline const rust_protocol_config_t *rust_protocol_config(u64 id) {
+    const u32 pid = obi_pid(id);
+    return bpf_map_lookup_elem(&rust_protocol_configs, &pid);
+}
+
+// Saves the original parent under the outgoing trace/span IDs and PID.
+// Header creation can precede generic span creation, so the parent must survive later task changes.
+static __always_inline void
+rust_save_wire_parent(u64 id, const tp_info_t *wire, const tp_info_pid_t *parent) {
+    rust_wire_key_t key = {.pid = obi_pid(id)};
+    __builtin_memcpy(key.trace_id, wire->trace_id, sizeof(key.trace_id));
+    __builtin_memcpy(key.span_id, wire->span_id, sizeof(key.span_id));
+
+    const long result = bpf_map_update_elem(&rust_wire_parents, &key, parent, BPF_ANY);
+    if (result) {
+        bpf_dbg_printk("rust wire parent store failed pid=%u err=%ld", key.pid, result);
+    }
+}
+
+// Looks up the saved parent matching the outgoing trace/span IDs and PID.
+static __always_inline tp_info_pid_t *rust_wire_parent(u32 pid, const tp_info_t *wire) {
+    if (!wire) {
+        return NULL;
+    }
+
+    rust_wire_key_t *key = rust_wire_key_mem();
+    if (!key) {
+        return NULL;
+    }
+
+    key->pid = pid;
+    __builtin_memcpy(key->trace_id, wire->trace_id, sizeof(key->trace_id));
+    __builtin_memcpy(key->span_id, wire->span_id, sizeof(key->span_id));
+
+    return bpf_map_lookup_elem(&rust_wire_parents, key);
+}
+
+// Returns the current task's pending HTTP/1 request unless generic capture already observed it.
+// Each connection task has one pending request for socket injection; observed requests lose ownership.
+static __always_inline rust_http_request_t *rust_current_request(u64 id) {
+    rust_task_key_t task = {};
+    rust_http_request_t *request =
+        rust_current_task(id, &task) ? bpf_map_lookup_elem(&rust_http1_requests, &task) : NULL;
+    return request && !request->observed ? request : NULL;
+}
+
+static __always_inline bool rust_request_has_wire_context(const rust_http_request_t *request) {
+    if (!request) {
+        return false;
+    }
+    if (request->injection_result == k_rust_injection_succeeded) {
+        return true;
+    }
+    return request->injection_result == k_rust_injection_application_owned && !request->forwarded;
+}
+
+static __always_inline void
+rust_socket_trace(const rust_http_request_t *request, u32 pid, tp_info_pid_t *trace) {
+    __builtin_memset(trace, 0, sizeof(*trace));
+    trace->tp = request->wire;
+    trace->pid = pid;
+    trace->valid = 1;
+    trace->req_type = k_event_type_http_client;
+}
+
+// Marks the current HTTP/1 request as observed so later writes cannot reuse its ownership.
+static __always_inline void rust_observe_request(u64 id) {
+    rust_http_request_t *request = rust_current_request(id);
+    if (request) {
+        request->observed = 1;
+    }
+}
+
+// Saves or replaces the pending HTTP/1 request for the current task.
+static __always_inline void rust_save_request(u64 id, const rust_http_request_t *request) {
+    rust_task_key_t task = {};
+    if (rust_current_task(id, &task)) {
+        bpf_map_update_elem(&rust_http1_requests, &task, request, BPF_ANY);
     }
 }

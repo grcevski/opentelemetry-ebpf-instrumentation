@@ -13,6 +13,20 @@ Threads that never poll a Tokio task, such as `std::thread` or rayon workers,
 keep per-thread request tracking. A task spawned from such a thread inherits the
 request that thread is serving.
 
+## Hyper and reqwest
+
+Hyper can write a request on a different task from its caller. OBI follows its
+request queues and uses the active request to correlate the client span and
+outgoing HTTP/1 header. For cleartext connections the socket injector uses the
+same ownership information when user-memory writes are unavailable.
+
+OBI selects HTTP/1 field offsets using the architecture, exact rustc patch,
+and crate versions recorded in its database. Tokio task tracking still works
+on supported patches without measured offsets. The offset generator reads
+debug information from fixture builds. Instrumented applications only need
+retained symbols.
+Run `make update-offsets` to update the database.
+
 ## Log enrichment
 
 When log enrichment is enabled for a Rust service, OBI can add the current

@@ -31,9 +31,10 @@ type rustExecutableKey struct {
 // rustExecutable is the ELF analysis shared by every process running one executable.
 // It is computed once and only read afterwards.
 type rustExecutable struct {
-	once   sync.Once
-	probes rustProbeSymbols
-	err    error
+	once     sync.Once
+	probes   rustProbeSymbols
+	protocol *BpfRustProtocolConfigT
+	err      error
 }
 
 func newRustExecutableCache() *lru.Cache[rustExecutableKey, *rustExecutable] {
@@ -82,5 +83,5 @@ func (e *rustExecutable) analyze(target *os.File) {
 		return
 	}
 
-	e.err = checkRustCompiler(f)
+	e.protocol, e.err = resolveRustProtocolLayouts(f, e.probes.layoutChannels()...)
 }

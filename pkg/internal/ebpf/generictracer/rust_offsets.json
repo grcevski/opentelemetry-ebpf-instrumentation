@@ -3,72 +3,2342 @@
     {
       "Arch": "amd64",
       "Rustc": "1.100.0",
+      "Crates": {
+        "bytes": [
+          "0.5.6",
+          "1.12.1"
+        ],
+        "h2": [
+          "0.2.7"
+        ],
+        "http": [
+          "0.2.12"
+        ],
+        "hyper": [
+          "0.13.10"
+        ],
+        "reqwest": [
+          "0.10.10"
+        ],
+        "tokio": [
+          "0.2.25",
+          "1.54.1"
+        ]
+      },
+      "Config": {
+        "VecPtr": 8,
+        "VecLen": 16,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 32,
+        "HeaderCount": 40,
+        "BucketSize": 104,
+        "NamePtr": 72,
+        "NameLen": 80,
+        "ValuePtr": 32,
+        "ValueLen": 40,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 1,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": {
+        "hyper::client::dispatch::Envelope<http::request::Request<reqwest::async_impl::body::ImplStream>, http::response::Response<hyper::body::body::Body>>": {
+          "ListHead": 0,
+          "ListIndex": 16,
+          "SlotMask": 31,
+          "TxTag": 256,
+          "TxSome": 0,
+          "TxPointer": 264,
+          "RxTag": 256,
+          "RxSome": 0,
+          "RxPointer": 264,
+          "RxHeaders": 0,
+          "Request": true
+        }
+      },
+      "CompilerCommit": "0ef1bc386059596dada8fb65b50425aab2ea637a"
+    },
+    {
+      "Arch": "amd64",
+      "Rustc": "1.100.0",
+      "Crates": {
+        "bytes": [
+          "1.12.1"
+        ],
+        "h2": [
+          "0.3.27"
+        ],
+        "http": [
+          "0.2.12"
+        ],
+        "hyper": [
+          "0.14.32"
+        ],
+        "reqwest": [
+          "0.11.27"
+        ],
+        "tokio": [
+          "1.54.1"
+        ]
+      },
+      "Config": {
+        "VecPtr": 8,
+        "VecLen": 16,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 32,
+        "HeaderCount": 40,
+        "BucketSize": 104,
+        "NamePtr": 72,
+        "NameLen": 80,
+        "ValuePtr": 32,
+        "ValueLen": 40,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 1,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": {
+        "hyper::client::dispatch::Envelope<http::request::Request<reqwest::async_impl::body::ImplStream>, http::response::Response<hyper::body::body::Body>>": {
+          "ListHead": 0,
+          "ListIndex": 16,
+          "SlotMask": 31,
+          "TxTag": 256,
+          "TxSome": 264,
+          "TxPointer": 272,
+          "RxTag": 256,
+          "RxSome": 264,
+          "RxPointer": 272,
+          "RxHeaders": 0,
+          "Request": true
+        }
+      },
+      "CompilerCommit": "0ef1bc386059596dada8fb65b50425aab2ea637a"
+    },
+    {
+      "Arch": "amd64",
+      "Rustc": "1.100.0",
+      "Crates": {
+        "bytes": [
+          "1.12.1"
+        ],
+        "http": [
+          "1.5.0"
+        ],
+        "hyper": [
+          "1.10.1",
+          "1.11.1",
+          "1.12.0",
+          "1.9.0"
+        ],
+        "reqwest": [
+          "0.12.28",
+          "0.13.5"
+        ],
+        "tokio": [
+          "1.51.6",
+          "1.52.4",
+          "1.53.3",
+          "1.54.1"
+        ]
+      },
+      "Config": {
+        "VecPtr": 8,
+        "VecLen": 16,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 32,
+        "HeaderCount": 40,
+        "BucketSize": 104,
+        "NamePtr": 72,
+        "NameLen": 80,
+        "ValuePtr": 32,
+        "ValueLen": 40,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 1,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": {
+        "hyper::client::dispatch::Envelope<http::request::Request<reqwest::async_impl::body::Body>, http::response::Response<hyper::body::incoming::Incoming>>": {
+          "ListHead": 0,
+          "ListIndex": 16,
+          "SlotMask": 31,
+          "TxTag": 256,
+          "TxSome": 264,
+          "TxPointer": 272,
+          "RxTag": 256,
+          "RxSome": 264,
+          "RxPointer": 272,
+          "RxHeaders": 0,
+          "Request": true
+        }
+      },
       "CompilerCommit": "0ef1bc386059596dada8fb65b50425aab2ea637a"
     },
     {
       "Arch": "amd64",
       "Rustc": "1.97.0",
+      "Crates": null,
+      "Config": {
+        "VecPtr": 0,
+        "VecLen": 0,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 0,
+        "HeaderCount": 0,
+        "BucketSize": 0,
+        "NamePtr": 0,
+        "NameLen": 0,
+        "ValuePtr": 0,
+        "ValueLen": 0,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 0,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": null,
       "CompilerCommit": "2d8144b7880597b6e6d3dfd63a9a9efae3f533d3"
     },
     {
       "Arch": "amd64",
       "Rustc": "1.97.1",
+      "Crates": {
+        "bytes": [
+          "0.5.6",
+          "1.12.1"
+        ],
+        "h2": [
+          "0.2.7"
+        ],
+        "http": [
+          "0.2.12"
+        ],
+        "hyper": [
+          "0.13.10"
+        ],
+        "reqwest": [
+          "0.10.10"
+        ],
+        "tokio": [
+          "0.2.25",
+          "1.54.1"
+        ]
+      },
+      "Config": {
+        "VecPtr": 8,
+        "VecLen": 16,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 32,
+        "HeaderCount": 40,
+        "BucketSize": 104,
+        "NamePtr": 72,
+        "NameLen": 80,
+        "ValuePtr": 32,
+        "ValueLen": 40,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 1,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": {
+        "hyper::client::dispatch::Envelope<http::request::Request<reqwest::async_impl::body::ImplStream>, http::response::Response<hyper::body::body::Body>>": {
+          "ListHead": 0,
+          "ListIndex": 16,
+          "SlotMask": 31,
+          "TxTag": 256,
+          "TxSome": 0,
+          "TxPointer": 264,
+          "RxTag": 256,
+          "RxSome": 0,
+          "RxPointer": 264,
+          "RxHeaders": 0,
+          "Request": true
+        }
+      },
+      "CompilerCommit": "8bab26f4f68e0e26f0bb7960be334d5b520ea452"
+    },
+    {
+      "Arch": "amd64",
+      "Rustc": "1.97.1",
+      "Crates": {
+        "bytes": [
+          "1.12.1"
+        ],
+        "h2": [
+          "0.3.27"
+        ],
+        "http": [
+          "0.2.12"
+        ],
+        "hyper": [
+          "0.14.32"
+        ],
+        "reqwest": [
+          "0.11.27"
+        ],
+        "tokio": [
+          "1.54.1"
+        ]
+      },
+      "Config": {
+        "VecPtr": 8,
+        "VecLen": 16,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 32,
+        "HeaderCount": 40,
+        "BucketSize": 104,
+        "NamePtr": 72,
+        "NameLen": 80,
+        "ValuePtr": 32,
+        "ValueLen": 40,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 1,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": {
+        "hyper::client::dispatch::Envelope<http::request::Request<reqwest::async_impl::body::ImplStream>, http::response::Response<hyper::body::body::Body>>": {
+          "ListHead": 0,
+          "ListIndex": 16,
+          "SlotMask": 31,
+          "TxTag": 256,
+          "TxSome": 264,
+          "TxPointer": 272,
+          "RxTag": 256,
+          "RxSome": 264,
+          "RxPointer": 272,
+          "RxHeaders": 0,
+          "Request": true
+        }
+      },
+      "CompilerCommit": "8bab26f4f68e0e26f0bb7960be334d5b520ea452"
+    },
+    {
+      "Arch": "amd64",
+      "Rustc": "1.97.1",
+      "Crates": {
+        "bytes": [
+          "1.12.1"
+        ],
+        "http": [
+          "1.5.0"
+        ],
+        "hyper": [
+          "1.10.1",
+          "1.11.1",
+          "1.12.0",
+          "1.9.0"
+        ],
+        "reqwest": [
+          "0.12.28",
+          "0.13.5"
+        ],
+        "tokio": [
+          "1.51.6",
+          "1.52.4",
+          "1.53.3",
+          "1.54.1"
+        ]
+      },
+      "Config": {
+        "VecPtr": 8,
+        "VecLen": 16,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 32,
+        "HeaderCount": 40,
+        "BucketSize": 104,
+        "NamePtr": 72,
+        "NameLen": 80,
+        "ValuePtr": 32,
+        "ValueLen": 40,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 1,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": {
+        "hyper::client::dispatch::Envelope<http::request::Request<reqwest::async_impl::body::Body>, http::response::Response<hyper::body::incoming::Incoming>>": {
+          "ListHead": 0,
+          "ListIndex": 16,
+          "SlotMask": 31,
+          "TxTag": 256,
+          "TxSome": 264,
+          "TxPointer": 272,
+          "RxTag": 256,
+          "RxSome": 264,
+          "RxPointer": 272,
+          "RxHeaders": 0,
+          "Request": true
+        }
+      },
       "CompilerCommit": "8bab26f4f68e0e26f0bb7960be334d5b520ea452"
     },
     {
       "Arch": "amd64",
       "Rustc": "1.98.0",
+      "Crates": null,
+      "Config": {
+        "VecPtr": 0,
+        "VecLen": 0,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 0,
+        "HeaderCount": 0,
+        "BucketSize": 0,
+        "NamePtr": 0,
+        "NameLen": 0,
+        "ValuePtr": 0,
+        "ValueLen": 0,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 0,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": null,
       "CompilerCommit": "88d9e12ae178fab0fb5cc050a94da85685d449ea"
     },
     {
       "Arch": "amd64",
       "Rustc": "1.98.1",
+      "Crates": {
+        "bytes": [
+          "0.5.6",
+          "1.12.1"
+        ],
+        "h2": [
+          "0.2.7"
+        ],
+        "http": [
+          "0.2.12"
+        ],
+        "hyper": [
+          "0.13.10"
+        ],
+        "reqwest": [
+          "0.10.10"
+        ],
+        "tokio": [
+          "0.2.25",
+          "1.54.1"
+        ]
+      },
+      "Config": {
+        "VecPtr": 8,
+        "VecLen": 16,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 32,
+        "HeaderCount": 40,
+        "BucketSize": 104,
+        "NamePtr": 72,
+        "NameLen": 80,
+        "ValuePtr": 32,
+        "ValueLen": 40,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 1,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": {
+        "hyper::client::dispatch::Envelope<http::request::Request<reqwest::async_impl::body::ImplStream>, http::response::Response<hyper::body::body::Body>>": {
+          "ListHead": 0,
+          "ListIndex": 16,
+          "SlotMask": 31,
+          "TxTag": 256,
+          "TxSome": 0,
+          "TxPointer": 264,
+          "RxTag": 256,
+          "RxSome": 0,
+          "RxPointer": 264,
+          "RxHeaders": 0,
+          "Request": true
+        }
+      },
+      "CompilerCommit": "48a229ceaefd4985c50990b14116b6d856af0985"
+    },
+    {
+      "Arch": "amd64",
+      "Rustc": "1.98.1",
+      "Crates": {
+        "bytes": [
+          "1.12.1"
+        ],
+        "h2": [
+          "0.3.27"
+        ],
+        "http": [
+          "0.2.12"
+        ],
+        "hyper": [
+          "0.14.32"
+        ],
+        "reqwest": [
+          "0.11.27"
+        ],
+        "tokio": [
+          "1.54.1"
+        ]
+      },
+      "Config": {
+        "VecPtr": 8,
+        "VecLen": 16,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 32,
+        "HeaderCount": 40,
+        "BucketSize": 104,
+        "NamePtr": 72,
+        "NameLen": 80,
+        "ValuePtr": 32,
+        "ValueLen": 40,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 1,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": {
+        "hyper::client::dispatch::Envelope<http::request::Request<reqwest::async_impl::body::ImplStream>, http::response::Response<hyper::body::body::Body>>": {
+          "ListHead": 0,
+          "ListIndex": 16,
+          "SlotMask": 31,
+          "TxTag": 256,
+          "TxSome": 264,
+          "TxPointer": 272,
+          "RxTag": 256,
+          "RxSome": 264,
+          "RxPointer": 272,
+          "RxHeaders": 0,
+          "Request": true
+        }
+      },
+      "CompilerCommit": "48a229ceaefd4985c50990b14116b6d856af0985"
+    },
+    {
+      "Arch": "amd64",
+      "Rustc": "1.98.1",
+      "Crates": {
+        "bytes": [
+          "1.12.1"
+        ],
+        "http": [
+          "1.5.0"
+        ],
+        "hyper": [
+          "1.10.1",
+          "1.11.1",
+          "1.12.0",
+          "1.9.0"
+        ],
+        "reqwest": [
+          "0.12.28",
+          "0.13.5"
+        ],
+        "tokio": [
+          "1.51.6",
+          "1.52.4",
+          "1.53.3",
+          "1.54.1"
+        ]
+      },
+      "Config": {
+        "VecPtr": 8,
+        "VecLen": 16,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 32,
+        "HeaderCount": 40,
+        "BucketSize": 104,
+        "NamePtr": 72,
+        "NameLen": 80,
+        "ValuePtr": 32,
+        "ValueLen": 40,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 1,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": {
+        "hyper::client::dispatch::Envelope<http::request::Request<reqwest::async_impl::body::Body>, http::response::Response<hyper::body::incoming::Incoming>>": {
+          "ListHead": 0,
+          "ListIndex": 16,
+          "SlotMask": 31,
+          "TxTag": 256,
+          "TxSome": 264,
+          "TxPointer": 272,
+          "RxTag": 256,
+          "RxSome": 264,
+          "RxPointer": 272,
+          "RxHeaders": 0,
+          "Request": true
+        }
+      },
       "CompilerCommit": "48a229ceaefd4985c50990b14116b6d856af0985"
     },
     {
       "Arch": "amd64",
       "Rustc": "1.99.0",
+      "Crates": null,
+      "Config": {
+        "VecPtr": 0,
+        "VecLen": 0,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 0,
+        "HeaderCount": 0,
+        "BucketSize": 0,
+        "NamePtr": 0,
+        "NameLen": 0,
+        "ValuePtr": 0,
+        "ValueLen": 0,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 0,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": null,
+      "CompilerCommit": "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
+    },
+    {
+      "Arch": "amd64",
+      "Rustc": "1.99.0",
+      "Crates": {
+        "bytes": [
+          "0.5.6",
+          "1.12.1"
+        ],
+        "h2": [
+          "0.2.7"
+        ],
+        "http": [
+          "0.2.12"
+        ],
+        "hyper": [
+          "0.13.10"
+        ],
+        "reqwest": [
+          "0.10.10"
+        ],
+        "tokio": [
+          "0.2.25",
+          "1.54.1"
+        ]
+      },
+      "Config": {
+        "VecPtr": 8,
+        "VecLen": 16,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 32,
+        "HeaderCount": 40,
+        "BucketSize": 104,
+        "NamePtr": 72,
+        "NameLen": 80,
+        "ValuePtr": 32,
+        "ValueLen": 40,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 1,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": {
+        "hyper::client::dispatch::Envelope<http::request::Request<reqwest::async_impl::body::ImplStream>, http::response::Response<hyper::body::body::Body>>": {
+          "ListHead": 0,
+          "ListIndex": 16,
+          "SlotMask": 31,
+          "TxTag": 256,
+          "TxSome": 0,
+          "TxPointer": 264,
+          "RxTag": 256,
+          "RxSome": 0,
+          "RxPointer": 264,
+          "RxHeaders": 0,
+          "Request": true
+        }
+      },
+      "CompilerCommit": "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
+    },
+    {
+      "Arch": "amd64",
+      "Rustc": "1.99.0",
+      "Crates": {
+        "bytes": [
+          "1.12.1"
+        ],
+        "h2": [
+          "0.3.27"
+        ],
+        "http": [
+          "0.2.12"
+        ],
+        "hyper": [
+          "0.14.32"
+        ],
+        "reqwest": [
+          "0.11.27"
+        ],
+        "tokio": [
+          "1.54.1"
+        ]
+      },
+      "Config": {
+        "VecPtr": 8,
+        "VecLen": 16,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 32,
+        "HeaderCount": 40,
+        "BucketSize": 104,
+        "NamePtr": 72,
+        "NameLen": 80,
+        "ValuePtr": 32,
+        "ValueLen": 40,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 1,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": {
+        "hyper::client::dispatch::Envelope<http::request::Request<reqwest::async_impl::body::ImplStream>, http::response::Response<hyper::body::body::Body>>": {
+          "ListHead": 0,
+          "ListIndex": 16,
+          "SlotMask": 31,
+          "TxTag": 256,
+          "TxSome": 264,
+          "TxPointer": 272,
+          "RxTag": 256,
+          "RxSome": 264,
+          "RxPointer": 272,
+          "RxHeaders": 0,
+          "Request": true
+        }
+      },
+      "CompilerCommit": "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
+    },
+    {
+      "Arch": "amd64",
+      "Rustc": "1.99.0",
+      "Crates": {
+        "bytes": [
+          "1.12.1"
+        ],
+        "http": [
+          "1.5.0"
+        ],
+        "hyper": [
+          "1.10.1",
+          "1.11.1",
+          "1.12.0",
+          "1.9.0"
+        ],
+        "reqwest": [
+          "0.12.28",
+          "0.13.5"
+        ],
+        "tokio": [
+          "1.51.6",
+          "1.52.4",
+          "1.53.3",
+          "1.54.1"
+        ]
+      },
+      "Config": {
+        "VecPtr": 8,
+        "VecLen": 16,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 32,
+        "HeaderCount": 40,
+        "BucketSize": 104,
+        "NamePtr": 72,
+        "NameLen": 80,
+        "ValuePtr": 32,
+        "ValueLen": 40,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 1,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": {
+        "hyper::client::dispatch::Envelope<http::request::Request<reqwest::async_impl::body::Body>, http::response::Response<hyper::body::incoming::Incoming>>": {
+          "ListHead": 0,
+          "ListIndex": 16,
+          "SlotMask": 31,
+          "TxTag": 256,
+          "TxSome": 264,
+          "TxPointer": 272,
+          "RxTag": 256,
+          "RxSome": 264,
+          "RxPointer": 272,
+          "RxHeaders": 0,
+          "Request": true
+        }
+      },
       "CompilerCommit": "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
     },
     {
       "Arch": "amd64",
       "Rustc": "1.99.1",
+      "Crates": {
+        "bytes": [
+          "0.5.6",
+          "1.12.1"
+        ],
+        "h2": [
+          "0.2.7"
+        ],
+        "http": [
+          "0.2.12"
+        ],
+        "hyper": [
+          "0.13.10"
+        ],
+        "reqwest": [
+          "0.10.10"
+        ],
+        "tokio": [
+          "0.2.25",
+          "1.54.1"
+        ]
+      },
+      "Config": {
+        "VecPtr": 8,
+        "VecLen": 16,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 32,
+        "HeaderCount": 40,
+        "BucketSize": 104,
+        "NamePtr": 72,
+        "NameLen": 80,
+        "ValuePtr": 32,
+        "ValueLen": 40,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 1,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": {
+        "hyper::client::dispatch::Envelope<http::request::Request<reqwest::async_impl::body::ImplStream>, http::response::Response<hyper::body::body::Body>>": {
+          "ListHead": 0,
+          "ListIndex": 16,
+          "SlotMask": 31,
+          "TxTag": 256,
+          "TxSome": 0,
+          "TxPointer": 264,
+          "RxTag": 256,
+          "RxSome": 0,
+          "RxPointer": 264,
+          "RxHeaders": 0,
+          "Request": true
+        }
+      },
+      "CompilerCommit": "58cf8f9c35b355199727627d07ae34a4e2846d67"
+    },
+    {
+      "Arch": "amd64",
+      "Rustc": "1.99.1",
+      "Crates": {
+        "bytes": [
+          "1.12.1"
+        ],
+        "h2": [
+          "0.3.27"
+        ],
+        "http": [
+          "0.2.12"
+        ],
+        "hyper": [
+          "0.14.32"
+        ],
+        "reqwest": [
+          "0.11.27"
+        ],
+        "tokio": [
+          "1.54.1"
+        ]
+      },
+      "Config": {
+        "VecPtr": 8,
+        "VecLen": 16,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 32,
+        "HeaderCount": 40,
+        "BucketSize": 104,
+        "NamePtr": 72,
+        "NameLen": 80,
+        "ValuePtr": 32,
+        "ValueLen": 40,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 1,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": {
+        "hyper::client::dispatch::Envelope<http::request::Request<reqwest::async_impl::body::ImplStream>, http::response::Response<hyper::body::body::Body>>": {
+          "ListHead": 0,
+          "ListIndex": 16,
+          "SlotMask": 31,
+          "TxTag": 256,
+          "TxSome": 264,
+          "TxPointer": 272,
+          "RxTag": 256,
+          "RxSome": 264,
+          "RxPointer": 272,
+          "RxHeaders": 0,
+          "Request": true
+        }
+      },
+      "CompilerCommit": "58cf8f9c35b355199727627d07ae34a4e2846d67"
+    },
+    {
+      "Arch": "amd64",
+      "Rustc": "1.99.1",
+      "Crates": {
+        "bytes": [
+          "1.12.1"
+        ],
+        "http": [
+          "1.5.0"
+        ],
+        "hyper": [
+          "1.10.1",
+          "1.11.1",
+          "1.12.0",
+          "1.9.0"
+        ],
+        "reqwest": [
+          "0.12.28",
+          "0.13.5"
+        ],
+        "tokio": [
+          "1.51.6",
+          "1.52.4",
+          "1.53.3",
+          "1.54.1"
+        ]
+      },
+      "Config": {
+        "VecPtr": 8,
+        "VecLen": 16,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 32,
+        "HeaderCount": 40,
+        "BucketSize": 104,
+        "NamePtr": 72,
+        "NameLen": 80,
+        "ValuePtr": 32,
+        "ValueLen": 40,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 1,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": {
+        "hyper::client::dispatch::Envelope<http::request::Request<reqwest::async_impl::body::Body>, http::response::Response<hyper::body::incoming::Incoming>>": {
+          "ListHead": 0,
+          "ListIndex": 16,
+          "SlotMask": 31,
+          "TxTag": 256,
+          "TxSome": 264,
+          "TxPointer": 272,
+          "RxTag": 256,
+          "RxSome": 264,
+          "RxPointer": 272,
+          "RxHeaders": 0,
+          "Request": true
+        }
+      },
       "CompilerCommit": "58cf8f9c35b355199727627d07ae34a4e2846d67"
     },
     {
       "Arch": "arm64",
       "Rustc": "1.100.0",
+      "Crates": {
+        "bytes": [
+          "0.5.6",
+          "1.12.1"
+        ],
+        "h2": [
+          "0.2.7"
+        ],
+        "http": [
+          "0.2.12"
+        ],
+        "hyper": [
+          "0.13.10"
+        ],
+        "reqwest": [
+          "0.10.10"
+        ],
+        "tokio": [
+          "1.54.1",
+          "0.2.25"
+        ]
+      },
+      "Config": {
+        "VecPtr": 8,
+        "VecLen": 16,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 32,
+        "HeaderCount": 40,
+        "BucketSize": 104,
+        "NamePtr": 72,
+        "NameLen": 80,
+        "ValuePtr": 32,
+        "ValueLen": 40,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 1,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": {
+        "hyper::client::dispatch::Envelope<http::request::Request<reqwest::async_impl::body::ImplStream>, http::response::Response<hyper::body::body::Body>>": {
+          "ListHead": 0,
+          "ListIndex": 16,
+          "SlotMask": 31,
+          "TxTag": 256,
+          "TxSome": 0,
+          "TxPointer": 264,
+          "RxTag": 256,
+          "RxSome": 0,
+          "RxPointer": 264,
+          "RxHeaders": 0,
+          "Request": true
+        }
+      },
+      "CompilerCommit": "0ef1bc386059596dada8fb65b50425aab2ea637a"
+    },
+    {
+      "Arch": "arm64",
+      "Rustc": "1.100.0",
+      "Crates": {
+        "bytes": [
+          "1.12.1"
+        ],
+        "h2": [
+          "0.3.27"
+        ],
+        "http": [
+          "0.2.12"
+        ],
+        "hyper": [
+          "0.14.32"
+        ],
+        "reqwest": [
+          "0.11.27"
+        ],
+        "tokio": [
+          "1.54.1"
+        ]
+      },
+      "Config": {
+        "VecPtr": 8,
+        "VecLen": 16,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 32,
+        "HeaderCount": 40,
+        "BucketSize": 104,
+        "NamePtr": 72,
+        "NameLen": 80,
+        "ValuePtr": 32,
+        "ValueLen": 40,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 1,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": {
+        "hyper::client::dispatch::Envelope<http::request::Request<reqwest::async_impl::body::ImplStream>, http::response::Response<hyper::body::body::Body>>": {
+          "ListHead": 0,
+          "ListIndex": 16,
+          "SlotMask": 31,
+          "TxTag": 256,
+          "TxSome": 264,
+          "TxPointer": 272,
+          "RxTag": 256,
+          "RxSome": 264,
+          "RxPointer": 272,
+          "RxHeaders": 0,
+          "Request": true
+        }
+      },
+      "CompilerCommit": "0ef1bc386059596dada8fb65b50425aab2ea637a"
+    },
+    {
+      "Arch": "arm64",
+      "Rustc": "1.100.0",
+      "Crates": {
+        "bytes": [
+          "1.12.1"
+        ],
+        "http": [
+          "1.5.0"
+        ],
+        "hyper": [
+          "1.10.1",
+          "1.11.1",
+          "1.12.0",
+          "1.9.0"
+        ],
+        "reqwest": [
+          "0.12.28",
+          "0.13.5"
+        ],
+        "tokio": [
+          "1.51.6",
+          "1.52.4",
+          "1.53.3",
+          "1.54.1"
+        ]
+      },
+      "Config": {
+        "VecPtr": 8,
+        "VecLen": 16,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 32,
+        "HeaderCount": 40,
+        "BucketSize": 104,
+        "NamePtr": 72,
+        "NameLen": 80,
+        "ValuePtr": 32,
+        "ValueLen": 40,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 1,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": {
+        "hyper::client::dispatch::Envelope<http::request::Request<reqwest::async_impl::body::Body>, http::response::Response<hyper::body::incoming::Incoming>>": {
+          "ListHead": 0,
+          "ListIndex": 16,
+          "SlotMask": 31,
+          "TxTag": 256,
+          "TxSome": 264,
+          "TxPointer": 272,
+          "RxTag": 256,
+          "RxSome": 264,
+          "RxPointer": 272,
+          "RxHeaders": 0,
+          "Request": true
+        }
+      },
       "CompilerCommit": "0ef1bc386059596dada8fb65b50425aab2ea637a"
     },
     {
       "Arch": "arm64",
       "Rustc": "1.97.0",
+      "Crates": null,
+      "Config": {
+        "VecPtr": 0,
+        "VecLen": 0,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 0,
+        "HeaderCount": 0,
+        "BucketSize": 0,
+        "NamePtr": 0,
+        "NameLen": 0,
+        "ValuePtr": 0,
+        "ValueLen": 0,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 0,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": null,
       "CompilerCommit": "2d8144b7880597b6e6d3dfd63a9a9efae3f533d3"
     },
     {
       "Arch": "arm64",
       "Rustc": "1.97.1",
+      "Crates": {
+        "bytes": [
+          "0.5.6",
+          "1.12.1"
+        ],
+        "h2": [
+          "0.2.7"
+        ],
+        "http": [
+          "0.2.12"
+        ],
+        "hyper": [
+          "0.13.10"
+        ],
+        "reqwest": [
+          "0.10.10"
+        ],
+        "tokio": [
+          "0.2.25",
+          "1.54.1"
+        ]
+      },
+      "Config": {
+        "VecPtr": 8,
+        "VecLen": 16,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 32,
+        "HeaderCount": 40,
+        "BucketSize": 104,
+        "NamePtr": 72,
+        "NameLen": 80,
+        "ValuePtr": 32,
+        "ValueLen": 40,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 1,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": {
+        "hyper::client::dispatch::Envelope<http::request::Request<reqwest::async_impl::body::ImplStream>, http::response::Response<hyper::body::body::Body>>": {
+          "ListHead": 0,
+          "ListIndex": 16,
+          "SlotMask": 31,
+          "TxTag": 256,
+          "TxSome": 0,
+          "TxPointer": 264,
+          "RxTag": 256,
+          "RxSome": 0,
+          "RxPointer": 264,
+          "RxHeaders": 0,
+          "Request": true
+        }
+      },
+      "CompilerCommit": "8bab26f4f68e0e26f0bb7960be334d5b520ea452"
+    },
+    {
+      "Arch": "arm64",
+      "Rustc": "1.97.1",
+      "Crates": {
+        "bytes": [
+          "1.12.1"
+        ],
+        "h2": [
+          "0.3.27"
+        ],
+        "http": [
+          "0.2.12"
+        ],
+        "hyper": [
+          "0.14.32"
+        ],
+        "reqwest": [
+          "0.11.27"
+        ],
+        "tokio": [
+          "1.54.1"
+        ]
+      },
+      "Config": {
+        "VecPtr": 8,
+        "VecLen": 16,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 32,
+        "HeaderCount": 40,
+        "BucketSize": 104,
+        "NamePtr": 72,
+        "NameLen": 80,
+        "ValuePtr": 32,
+        "ValueLen": 40,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 1,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": {
+        "hyper::client::dispatch::Envelope<http::request::Request<reqwest::async_impl::body::ImplStream>, http::response::Response<hyper::body::body::Body>>": {
+          "ListHead": 0,
+          "ListIndex": 16,
+          "SlotMask": 31,
+          "TxTag": 256,
+          "TxSome": 264,
+          "TxPointer": 272,
+          "RxTag": 256,
+          "RxSome": 264,
+          "RxPointer": 272,
+          "RxHeaders": 0,
+          "Request": true
+        }
+      },
+      "CompilerCommit": "8bab26f4f68e0e26f0bb7960be334d5b520ea452"
+    },
+    {
+      "Arch": "arm64",
+      "Rustc": "1.97.1",
+      "Crates": {
+        "bytes": [
+          "1.12.1"
+        ],
+        "http": [
+          "1.5.0"
+        ],
+        "hyper": [
+          "1.10.1",
+          "1.11.1",
+          "1.12.0",
+          "1.9.0"
+        ],
+        "reqwest": [
+          "0.12.28",
+          "0.13.5"
+        ],
+        "tokio": [
+          "1.51.6",
+          "1.52.4",
+          "1.53.3",
+          "1.54.1"
+        ]
+      },
+      "Config": {
+        "VecPtr": 8,
+        "VecLen": 16,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 32,
+        "HeaderCount": 40,
+        "BucketSize": 104,
+        "NamePtr": 72,
+        "NameLen": 80,
+        "ValuePtr": 32,
+        "ValueLen": 40,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 1,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": {
+        "hyper::client::dispatch::Envelope<http::request::Request<reqwest::async_impl::body::Body>, http::response::Response<hyper::body::incoming::Incoming>>": {
+          "ListHead": 0,
+          "ListIndex": 16,
+          "SlotMask": 31,
+          "TxTag": 256,
+          "TxSome": 264,
+          "TxPointer": 272,
+          "RxTag": 256,
+          "RxSome": 264,
+          "RxPointer": 272,
+          "RxHeaders": 0,
+          "Request": true
+        }
+      },
       "CompilerCommit": "8bab26f4f68e0e26f0bb7960be334d5b520ea452"
     },
     {
       "Arch": "arm64",
       "Rustc": "1.98.0",
+      "Crates": null,
+      "Config": {
+        "VecPtr": 0,
+        "VecLen": 0,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 0,
+        "HeaderCount": 0,
+        "BucketSize": 0,
+        "NamePtr": 0,
+        "NameLen": 0,
+        "ValuePtr": 0,
+        "ValueLen": 0,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 0,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": null,
       "CompilerCommit": "88d9e12ae178fab0fb5cc050a94da85685d449ea"
     },
     {
       "Arch": "arm64",
       "Rustc": "1.98.1",
+      "Crates": {
+        "bytes": [
+          "0.5.6",
+          "1.12.1"
+        ],
+        "h2": [
+          "0.2.7"
+        ],
+        "http": [
+          "0.2.12"
+        ],
+        "hyper": [
+          "0.13.10"
+        ],
+        "reqwest": [
+          "0.10.10"
+        ],
+        "tokio": [
+          "1.54.1",
+          "0.2.25"
+        ]
+      },
+      "Config": {
+        "VecPtr": 8,
+        "VecLen": 16,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 32,
+        "HeaderCount": 40,
+        "BucketSize": 104,
+        "NamePtr": 72,
+        "NameLen": 80,
+        "ValuePtr": 32,
+        "ValueLen": 40,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 1,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": {
+        "hyper::client::dispatch::Envelope<http::request::Request<reqwest::async_impl::body::ImplStream>, http::response::Response<hyper::body::body::Body>>": {
+          "ListHead": 0,
+          "ListIndex": 16,
+          "SlotMask": 31,
+          "TxTag": 256,
+          "TxSome": 0,
+          "TxPointer": 264,
+          "RxTag": 256,
+          "RxSome": 0,
+          "RxPointer": 264,
+          "RxHeaders": 0,
+          "Request": true
+        }
+      },
+      "CompilerCommit": "48a229ceaefd4985c50990b14116b6d856af0985"
+    },
+    {
+      "Arch": "arm64",
+      "Rustc": "1.98.1",
+      "Crates": {
+        "bytes": [
+          "1.12.1"
+        ],
+        "h2": [
+          "0.3.27"
+        ],
+        "http": [
+          "0.2.12"
+        ],
+        "hyper": [
+          "0.14.32"
+        ],
+        "reqwest": [
+          "0.11.27"
+        ],
+        "tokio": [
+          "1.54.1"
+        ]
+      },
+      "Config": {
+        "VecPtr": 8,
+        "VecLen": 16,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 32,
+        "HeaderCount": 40,
+        "BucketSize": 104,
+        "NamePtr": 72,
+        "NameLen": 80,
+        "ValuePtr": 32,
+        "ValueLen": 40,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 1,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": {
+        "hyper::client::dispatch::Envelope<http::request::Request<reqwest::async_impl::body::ImplStream>, http::response::Response<hyper::body::body::Body>>": {
+          "ListHead": 0,
+          "ListIndex": 16,
+          "SlotMask": 31,
+          "TxTag": 256,
+          "TxSome": 264,
+          "TxPointer": 272,
+          "RxTag": 256,
+          "RxSome": 264,
+          "RxPointer": 272,
+          "RxHeaders": 0,
+          "Request": true
+        }
+      },
+      "CompilerCommit": "48a229ceaefd4985c50990b14116b6d856af0985"
+    },
+    {
+      "Arch": "arm64",
+      "Rustc": "1.98.1",
+      "Crates": {
+        "bytes": [
+          "1.12.1"
+        ],
+        "http": [
+          "1.5.0"
+        ],
+        "hyper": [
+          "1.10.1",
+          "1.11.1",
+          "1.12.0",
+          "1.9.0"
+        ],
+        "reqwest": [
+          "0.12.28",
+          "0.13.5"
+        ],
+        "tokio": [
+          "1.51.6",
+          "1.52.4",
+          "1.53.3",
+          "1.54.1"
+        ]
+      },
+      "Config": {
+        "VecPtr": 8,
+        "VecLen": 16,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 32,
+        "HeaderCount": 40,
+        "BucketSize": 104,
+        "NamePtr": 72,
+        "NameLen": 80,
+        "ValuePtr": 32,
+        "ValueLen": 40,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 1,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": {
+        "hyper::client::dispatch::Envelope<http::request::Request<reqwest::async_impl::body::Body>, http::response::Response<hyper::body::incoming::Incoming>>": {
+          "ListHead": 0,
+          "ListIndex": 16,
+          "SlotMask": 31,
+          "TxTag": 256,
+          "TxSome": 264,
+          "TxPointer": 272,
+          "RxTag": 256,
+          "RxSome": 264,
+          "RxPointer": 272,
+          "RxHeaders": 0,
+          "Request": true
+        }
+      },
       "CompilerCommit": "48a229ceaefd4985c50990b14116b6d856af0985"
     },
     {
       "Arch": "arm64",
       "Rustc": "1.99.0",
+      "Crates": null,
+      "Config": {
+        "VecPtr": 0,
+        "VecLen": 0,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 0,
+        "HeaderCount": 0,
+        "BucketSize": 0,
+        "NamePtr": 0,
+        "NameLen": 0,
+        "ValuePtr": 0,
+        "ValueLen": 0,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 0,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": null,
+      "CompilerCommit": "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
+    },
+    {
+      "Arch": "arm64",
+      "Rustc": "1.99.0",
+      "Crates": {
+        "bytes": [
+          "0.5.6",
+          "1.12.1"
+        ],
+        "h2": [
+          "0.2.7"
+        ],
+        "http": [
+          "0.2.12"
+        ],
+        "hyper": [
+          "0.13.10"
+        ],
+        "reqwest": [
+          "0.10.10"
+        ],
+        "tokio": [
+          "1.54.1",
+          "0.2.25"
+        ]
+      },
+      "Config": {
+        "VecPtr": 8,
+        "VecLen": 16,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 32,
+        "HeaderCount": 40,
+        "BucketSize": 104,
+        "NamePtr": 72,
+        "NameLen": 80,
+        "ValuePtr": 32,
+        "ValueLen": 40,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 1,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": {
+        "hyper::client::dispatch::Envelope<http::request::Request<reqwest::async_impl::body::ImplStream>, http::response::Response<hyper::body::body::Body>>": {
+          "ListHead": 0,
+          "ListIndex": 16,
+          "SlotMask": 31,
+          "TxTag": 256,
+          "TxSome": 0,
+          "TxPointer": 264,
+          "RxTag": 256,
+          "RxSome": 0,
+          "RxPointer": 264,
+          "RxHeaders": 0,
+          "Request": true
+        }
+      },
+      "CompilerCommit": "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
+    },
+    {
+      "Arch": "arm64",
+      "Rustc": "1.99.0",
+      "Crates": {
+        "bytes": [
+          "1.12.1"
+        ],
+        "h2": [
+          "0.3.27"
+        ],
+        "http": [
+          "0.2.12"
+        ],
+        "hyper": [
+          "0.14.32"
+        ],
+        "reqwest": [
+          "0.11.27"
+        ],
+        "tokio": [
+          "1.54.1"
+        ]
+      },
+      "Config": {
+        "VecPtr": 8,
+        "VecLen": 16,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 32,
+        "HeaderCount": 40,
+        "BucketSize": 104,
+        "NamePtr": 72,
+        "NameLen": 80,
+        "ValuePtr": 32,
+        "ValueLen": 40,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 1,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": {
+        "hyper::client::dispatch::Envelope<http::request::Request<reqwest::async_impl::body::ImplStream>, http::response::Response<hyper::body::body::Body>>": {
+          "ListHead": 0,
+          "ListIndex": 16,
+          "SlotMask": 31,
+          "TxTag": 256,
+          "TxSome": 264,
+          "TxPointer": 272,
+          "RxTag": 256,
+          "RxSome": 264,
+          "RxPointer": 272,
+          "RxHeaders": 0,
+          "Request": true
+        }
+      },
+      "CompilerCommit": "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
+    },
+    {
+      "Arch": "arm64",
+      "Rustc": "1.99.0",
+      "Crates": {
+        "bytes": [
+          "1.12.1"
+        ],
+        "http": [
+          "1.5.0"
+        ],
+        "hyper": [
+          "1.10.1",
+          "1.11.1",
+          "1.12.0",
+          "1.9.0"
+        ],
+        "reqwest": [
+          "0.12.28",
+          "0.13.5"
+        ],
+        "tokio": [
+          "1.51.6",
+          "1.52.4",
+          "1.53.3",
+          "1.54.1"
+        ]
+      },
+      "Config": {
+        "VecPtr": 8,
+        "VecLen": 16,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 32,
+        "HeaderCount": 40,
+        "BucketSize": 104,
+        "NamePtr": 72,
+        "NameLen": 80,
+        "ValuePtr": 32,
+        "ValueLen": 40,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 1,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": {
+        "hyper::client::dispatch::Envelope<http::request::Request<reqwest::async_impl::body::Body>, http::response::Response<hyper::body::incoming::Incoming>>": {
+          "ListHead": 0,
+          "ListIndex": 16,
+          "SlotMask": 31,
+          "TxTag": 256,
+          "TxSome": 264,
+          "TxPointer": 272,
+          "RxTag": 256,
+          "RxSome": 264,
+          "RxPointer": 272,
+          "RxHeaders": 0,
+          "Request": true
+        }
+      },
       "CompilerCommit": "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
     },
     {
       "Arch": "arm64",
       "Rustc": "1.99.1",
+      "Crates": {
+        "bytes": [
+          "0.5.6",
+          "1.12.1"
+        ],
+        "h2": [
+          "0.2.7"
+        ],
+        "http": [
+          "0.2.12"
+        ],
+        "hyper": [
+          "0.13.10"
+        ],
+        "reqwest": [
+          "0.10.10"
+        ],
+        "tokio": [
+          "1.54.1",
+          "0.2.25"
+        ]
+      },
+      "Config": {
+        "VecPtr": 8,
+        "VecLen": 16,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 32,
+        "HeaderCount": 40,
+        "BucketSize": 104,
+        "NamePtr": 72,
+        "NameLen": 80,
+        "ValuePtr": 32,
+        "ValueLen": 40,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 1,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": {
+        "hyper::client::dispatch::Envelope<http::request::Request<reqwest::async_impl::body::ImplStream>, http::response::Response<hyper::body::body::Body>>": {
+          "ListHead": 0,
+          "ListIndex": 16,
+          "SlotMask": 31,
+          "TxTag": 256,
+          "TxSome": 0,
+          "TxPointer": 264,
+          "RxTag": 256,
+          "RxSome": 0,
+          "RxPointer": 264,
+          "RxHeaders": 0,
+          "Request": true
+        }
+      },
+      "CompilerCommit": "58cf8f9c35b355199727627d07ae34a4e2846d67"
+    },
+    {
+      "Arch": "arm64",
+      "Rustc": "1.99.1",
+      "Crates": {
+        "bytes": [
+          "1.12.1"
+        ],
+        "h2": [
+          "0.3.27"
+        ],
+        "http": [
+          "0.2.12"
+        ],
+        "hyper": [
+          "0.14.32"
+        ],
+        "reqwest": [
+          "0.11.27"
+        ],
+        "tokio": [
+          "1.54.1"
+        ]
+      },
+      "Config": {
+        "VecPtr": 8,
+        "VecLen": 16,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 32,
+        "HeaderCount": 40,
+        "BucketSize": 104,
+        "NamePtr": 72,
+        "NameLen": 80,
+        "ValuePtr": 32,
+        "ValueLen": 40,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 1,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": {
+        "hyper::client::dispatch::Envelope<http::request::Request<reqwest::async_impl::body::ImplStream>, http::response::Response<hyper::body::body::Body>>": {
+          "ListHead": 0,
+          "ListIndex": 16,
+          "SlotMask": 31,
+          "TxTag": 256,
+          "TxSome": 264,
+          "TxPointer": 272,
+          "RxTag": 256,
+          "RxSome": 264,
+          "RxPointer": 272,
+          "RxHeaders": 0,
+          "Request": true
+        }
+      },
+      "CompilerCommit": "58cf8f9c35b355199727627d07ae34a4e2846d67"
+    },
+    {
+      "Arch": "arm64",
+      "Rustc": "1.99.1",
+      "Crates": {
+        "bytes": [
+          "1.12.1"
+        ],
+        "http": [
+          "1.5.0"
+        ],
+        "hyper": [
+          "1.10.1",
+          "1.11.1",
+          "1.12.0",
+          "1.9.0"
+        ],
+        "reqwest": [
+          "0.12.28",
+          "0.13.5"
+        ],
+        "tokio": [
+          "1.51.6",
+          "1.52.4",
+          "1.53.3",
+          "1.54.1"
+        ]
+      },
+      "Config": {
+        "VecPtr": 8,
+        "VecLen": 16,
+        "VecCap": 0,
+        "RequestHeaders": 0,
+        "HeaderEntries": 32,
+        "HeaderCount": 40,
+        "BucketSize": 104,
+        "NamePtr": 72,
+        "NameLen": 80,
+        "ValuePtr": 32,
+        "ValueLen": 40,
+        "ListHead": 0,
+        "ListIndex": 0,
+        "SlotMask": 0,
+        "MessageTxTag": 0,
+        "MessageTxSome": 0,
+        "MessageTxPointer": 0,
+        "MessageRxTag": 0,
+        "MessageRxSome": 0,
+        "MessageRxPointer": 0,
+        "MessageRxHeaders": 0,
+        "Http1": 1,
+        "Inject": 0,
+        "Message": 0
+      },
+      "Channels": {
+        "hyper::client::dispatch::Envelope<http::request::Request<reqwest::async_impl::body::Body>, http::response::Response<hyper::body::incoming::Incoming>>": {
+          "ListHead": 0,
+          "ListIndex": 16,
+          "SlotMask": 31,
+          "TxTag": 256,
+          "TxSome": 264,
+          "TxPointer": 272,
+          "RxTag": 256,
+          "RxSome": 264,
+          "RxPointer": 272,
+          "RxHeaders": 0,
+          "Request": true
+        }
+      },
       "CompilerCommit": "58cf8f9c35b355199727627d07ae34a4e2846d67"
     }
-  ]
+  ],
+  "measurements": {
+    "1.97.1/x86_64-unknown-linux-gnu/latest": "40950c24ba755b6d91bff138c4e8190081b33fde50c396341210fd9144c15930",
+    "1.97.1/aarch64-unknown-linux-gnu/latest": "40950c24ba755b6d91bff138c4e8190081b33fde50c396341210fd9144c15930",
+    "1.97.1/x86_64-unknown-linux-gnu/tokio-1.53": "fdc2620d283bf6b3e046af651498c977a5660d140bcba0e4bc1dd62b71064628",
+    "1.97.1/aarch64-unknown-linux-gnu/tokio-1.53": "fdc2620d283bf6b3e046af651498c977a5660d140bcba0e4bc1dd62b71064628",
+    "1.97.1/x86_64-unknown-linux-gnu/tokio-1.52": "58d0432eeb1ce70897f085d1f5c47231e9c08320fa625de88e3d59f656ceb4db",
+    "1.97.1/aarch64-unknown-linux-gnu/tokio-1.52": "58d0432eeb1ce70897f085d1f5c47231e9c08320fa625de88e3d59f656ceb4db",
+    "1.97.1/x86_64-unknown-linux-gnu/tokio-1.51": "14b78eb35c4e341db9bab055322b60c26d1a9b342d810ec46a7c400ffef76823",
+    "1.97.1/aarch64-unknown-linux-gnu/tokio-1.51": "14b78eb35c4e341db9bab055322b60c26d1a9b342d810ec46a7c400ffef76823",
+    "1.97.1/x86_64-unknown-linux-gnu/reqwest-0.12": "d275b2a5abb676c4bfb79553990e9bcfe43e7740dc23ebaea4a2e6fc6e60674b",
+    "1.97.1/aarch64-unknown-linux-gnu/reqwest-0.12": "d275b2a5abb676c4bfb79553990e9bcfe43e7740dc23ebaea4a2e6fc6e60674b",
+    "1.97.1/x86_64-unknown-linux-gnu/reqwest-0.11": "5c190744c5021c8b36e1e1de30b4d1b78e1c0f1db36e057ba6da52d0488ee5a2",
+    "1.97.1/aarch64-unknown-linux-gnu/reqwest-0.11": "5c190744c5021c8b36e1e1de30b4d1b78e1c0f1db36e057ba6da52d0488ee5a2",
+    "1.97.1/x86_64-unknown-linux-gnu/reqwest-0.10": "084c66035d8752b205ae0f4498956eed4b485009e4cf9eb42c15ebe2802d2e59",
+    "1.97.1/aarch64-unknown-linux-gnu/reqwest-0.10": "084c66035d8752b205ae0f4498956eed4b485009e4cf9eb42c15ebe2802d2e59",
+    "1.97.1/x86_64-unknown-linux-gnu/hyper-1.11": "67990c10c243e657cda5b8a44cea4f1882896008885e34f8e172878ba65dd10b",
+    "1.97.1/aarch64-unknown-linux-gnu/hyper-1.11": "67990c10c243e657cda5b8a44cea4f1882896008885e34f8e172878ba65dd10b",
+    "1.97.1/x86_64-unknown-linux-gnu/hyper-1.10": "c9786738537c1462765fde8f2c312ea040bd8466c32970c443ab8bea863b1f23",
+    "1.97.1/aarch64-unknown-linux-gnu/hyper-1.10": "c9786738537c1462765fde8f2c312ea040bd8466c32970c443ab8bea863b1f23",
+    "1.97.1/x86_64-unknown-linux-gnu/hyper-1.9": "76799f30a720f2295ec879dd7c8455d7829deeb696ab08f0bcfdc48007885551",
+    "1.97.1/aarch64-unknown-linux-gnu/hyper-1.9": "76799f30a720f2295ec879dd7c8455d7829deeb696ab08f0bcfdc48007885551",
+    "1.98.1/x86_64-unknown-linux-gnu/latest": "40950c24ba755b6d91bff138c4e8190081b33fde50c396341210fd9144c15930",
+    "1.98.1/aarch64-unknown-linux-gnu/latest": "40950c24ba755b6d91bff138c4e8190081b33fde50c396341210fd9144c15930",
+    "1.98.1/x86_64-unknown-linux-gnu/tokio-1.53": "fdc2620d283bf6b3e046af651498c977a5660d140bcba0e4bc1dd62b71064628",
+    "1.98.1/aarch64-unknown-linux-gnu/tokio-1.53": "fdc2620d283bf6b3e046af651498c977a5660d140bcba0e4bc1dd62b71064628",
+    "1.98.1/x86_64-unknown-linux-gnu/tokio-1.52": "58d0432eeb1ce70897f085d1f5c47231e9c08320fa625de88e3d59f656ceb4db",
+    "1.98.1/aarch64-unknown-linux-gnu/tokio-1.52": "58d0432eeb1ce70897f085d1f5c47231e9c08320fa625de88e3d59f656ceb4db",
+    "1.98.1/x86_64-unknown-linux-gnu/tokio-1.51": "14b78eb35c4e341db9bab055322b60c26d1a9b342d810ec46a7c400ffef76823",
+    "1.98.1/aarch64-unknown-linux-gnu/tokio-1.51": "14b78eb35c4e341db9bab055322b60c26d1a9b342d810ec46a7c400ffef76823",
+    "1.98.1/x86_64-unknown-linux-gnu/reqwest-0.12": "d275b2a5abb676c4bfb79553990e9bcfe43e7740dc23ebaea4a2e6fc6e60674b",
+    "1.98.1/aarch64-unknown-linux-gnu/reqwest-0.12": "d275b2a5abb676c4bfb79553990e9bcfe43e7740dc23ebaea4a2e6fc6e60674b",
+    "1.98.1/x86_64-unknown-linux-gnu/reqwest-0.11": "5c190744c5021c8b36e1e1de30b4d1b78e1c0f1db36e057ba6da52d0488ee5a2",
+    "1.98.1/aarch64-unknown-linux-gnu/reqwest-0.11": "5c190744c5021c8b36e1e1de30b4d1b78e1c0f1db36e057ba6da52d0488ee5a2",
+    "1.98.1/x86_64-unknown-linux-gnu/reqwest-0.10": "084c66035d8752b205ae0f4498956eed4b485009e4cf9eb42c15ebe2802d2e59",
+    "1.98.1/aarch64-unknown-linux-gnu/reqwest-0.10": "084c66035d8752b205ae0f4498956eed4b485009e4cf9eb42c15ebe2802d2e59",
+    "1.98.1/x86_64-unknown-linux-gnu/hyper-1.11": "67990c10c243e657cda5b8a44cea4f1882896008885e34f8e172878ba65dd10b",
+    "1.98.1/aarch64-unknown-linux-gnu/hyper-1.11": "67990c10c243e657cda5b8a44cea4f1882896008885e34f8e172878ba65dd10b",
+    "1.98.1/x86_64-unknown-linux-gnu/hyper-1.10": "c9786738537c1462765fde8f2c312ea040bd8466c32970c443ab8bea863b1f23",
+    "1.98.1/aarch64-unknown-linux-gnu/hyper-1.10": "c9786738537c1462765fde8f2c312ea040bd8466c32970c443ab8bea863b1f23",
+    "1.98.1/x86_64-unknown-linux-gnu/hyper-1.9": "76799f30a720f2295ec879dd7c8455d7829deeb696ab08f0bcfdc48007885551",
+    "1.98.1/aarch64-unknown-linux-gnu/hyper-1.9": "76799f30a720f2295ec879dd7c8455d7829deeb696ab08f0bcfdc48007885551",
+    "1.99.1/x86_64-unknown-linux-gnu/latest": "40950c24ba755b6d91bff138c4e8190081b33fde50c396341210fd9144c15930",
+    "1.99.1/aarch64-unknown-linux-gnu/latest": "40950c24ba755b6d91bff138c4e8190081b33fde50c396341210fd9144c15930",
+    "1.99.1/x86_64-unknown-linux-gnu/tokio-1.53": "fdc2620d283bf6b3e046af651498c977a5660d140bcba0e4bc1dd62b71064628",
+    "1.99.1/aarch64-unknown-linux-gnu/tokio-1.53": "fdc2620d283bf6b3e046af651498c977a5660d140bcba0e4bc1dd62b71064628",
+    "1.99.1/x86_64-unknown-linux-gnu/tokio-1.52": "58d0432eeb1ce70897f085d1f5c47231e9c08320fa625de88e3d59f656ceb4db",
+    "1.99.1/aarch64-unknown-linux-gnu/tokio-1.52": "58d0432eeb1ce70897f085d1f5c47231e9c08320fa625de88e3d59f656ceb4db",
+    "1.99.1/x86_64-unknown-linux-gnu/tokio-1.51": "14b78eb35c4e341db9bab055322b60c26d1a9b342d810ec46a7c400ffef76823",
+    "1.99.1/aarch64-unknown-linux-gnu/tokio-1.51": "14b78eb35c4e341db9bab055322b60c26d1a9b342d810ec46a7c400ffef76823",
+    "1.99.1/x86_64-unknown-linux-gnu/reqwest-0.12": "d275b2a5abb676c4bfb79553990e9bcfe43e7740dc23ebaea4a2e6fc6e60674b",
+    "1.99.1/aarch64-unknown-linux-gnu/reqwest-0.12": "d275b2a5abb676c4bfb79553990e9bcfe43e7740dc23ebaea4a2e6fc6e60674b",
+    "1.99.1/x86_64-unknown-linux-gnu/reqwest-0.11": "5c190744c5021c8b36e1e1de30b4d1b78e1c0f1db36e057ba6da52d0488ee5a2",
+    "1.99.1/aarch64-unknown-linux-gnu/reqwest-0.11": "5c190744c5021c8b36e1e1de30b4d1b78e1c0f1db36e057ba6da52d0488ee5a2",
+    "1.99.1/x86_64-unknown-linux-gnu/reqwest-0.10": "084c66035d8752b205ae0f4498956eed4b485009e4cf9eb42c15ebe2802d2e59",
+    "1.99.1/aarch64-unknown-linux-gnu/reqwest-0.10": "084c66035d8752b205ae0f4498956eed4b485009e4cf9eb42c15ebe2802d2e59",
+    "1.99.1/x86_64-unknown-linux-gnu/hyper-1.11": "67990c10c243e657cda5b8a44cea4f1882896008885e34f8e172878ba65dd10b",
+    "1.99.1/aarch64-unknown-linux-gnu/hyper-1.11": "67990c10c243e657cda5b8a44cea4f1882896008885e34f8e172878ba65dd10b",
+    "1.99.1/x86_64-unknown-linux-gnu/hyper-1.10": "c9786738537c1462765fde8f2c312ea040bd8466c32970c443ab8bea863b1f23",
+    "1.99.1/aarch64-unknown-linux-gnu/hyper-1.10": "c9786738537c1462765fde8f2c312ea040bd8466c32970c443ab8bea863b1f23",
+    "1.99.1/x86_64-unknown-linux-gnu/hyper-1.9": "76799f30a720f2295ec879dd7c8455d7829deeb696ab08f0bcfdc48007885551",
+    "1.99.1/aarch64-unknown-linux-gnu/hyper-1.9": "76799f30a720f2295ec879dd7c8455d7829deeb696ab08f0bcfdc48007885551",
+    "1.100.0/x86_64-unknown-linux-gnu/latest": "40950c24ba755b6d91bff138c4e8190081b33fde50c396341210fd9144c15930",
+    "1.100.0/aarch64-unknown-linux-gnu/latest": "40950c24ba755b6d91bff138c4e8190081b33fde50c396341210fd9144c15930",
+    "1.100.0/x86_64-unknown-linux-gnu/tokio-1.53": "fdc2620d283bf6b3e046af651498c977a5660d140bcba0e4bc1dd62b71064628",
+    "1.100.0/aarch64-unknown-linux-gnu/tokio-1.53": "fdc2620d283bf6b3e046af651498c977a5660d140bcba0e4bc1dd62b71064628",
+    "1.100.0/x86_64-unknown-linux-gnu/tokio-1.52": "58d0432eeb1ce70897f085d1f5c47231e9c08320fa625de88e3d59f656ceb4db",
+    "1.100.0/aarch64-unknown-linux-gnu/tokio-1.52": "58d0432eeb1ce70897f085d1f5c47231e9c08320fa625de88e3d59f656ceb4db",
+    "1.100.0/x86_64-unknown-linux-gnu/tokio-1.51": "14b78eb35c4e341db9bab055322b60c26d1a9b342d810ec46a7c400ffef76823",
+    "1.100.0/aarch64-unknown-linux-gnu/tokio-1.51": "14b78eb35c4e341db9bab055322b60c26d1a9b342d810ec46a7c400ffef76823",
+    "1.100.0/x86_64-unknown-linux-gnu/reqwest-0.12": "d275b2a5abb676c4bfb79553990e9bcfe43e7740dc23ebaea4a2e6fc6e60674b",
+    "1.100.0/aarch64-unknown-linux-gnu/reqwest-0.12": "d275b2a5abb676c4bfb79553990e9bcfe43e7740dc23ebaea4a2e6fc6e60674b",
+    "1.100.0/x86_64-unknown-linux-gnu/reqwest-0.11": "5c190744c5021c8b36e1e1de30b4d1b78e1c0f1db36e057ba6da52d0488ee5a2",
+    "1.100.0/aarch64-unknown-linux-gnu/reqwest-0.11": "5c190744c5021c8b36e1e1de30b4d1b78e1c0f1db36e057ba6da52d0488ee5a2",
+    "1.100.0/x86_64-unknown-linux-gnu/reqwest-0.10": "084c66035d8752b205ae0f4498956eed4b485009e4cf9eb42c15ebe2802d2e59",
+    "1.100.0/aarch64-unknown-linux-gnu/reqwest-0.10": "084c66035d8752b205ae0f4498956eed4b485009e4cf9eb42c15ebe2802d2e59",
+    "1.100.0/x86_64-unknown-linux-gnu/hyper-1.11": "67990c10c243e657cda5b8a44cea4f1882896008885e34f8e172878ba65dd10b",
+    "1.100.0/aarch64-unknown-linux-gnu/hyper-1.11": "67990c10c243e657cda5b8a44cea4f1882896008885e34f8e172878ba65dd10b",
+    "1.100.0/x86_64-unknown-linux-gnu/hyper-1.10": "c9786738537c1462765fde8f2c312ea040bd8466c32970c443ab8bea863b1f23",
+    "1.100.0/aarch64-unknown-linux-gnu/hyper-1.10": "c9786738537c1462765fde8f2c312ea040bd8466c32970c443ab8bea863b1f23",
+    "1.100.0/x86_64-unknown-linux-gnu/hyper-1.9": "76799f30a720f2295ec879dd7c8455d7829deeb696ab08f0bcfdc48007885551",
+    "1.100.0/aarch64-unknown-linux-gnu/hyper-1.9": "76799f30a720f2295ec879dd7c8455d7829deeb696ab08f0bcfdc48007885551",
+    "1.99.0/x86_64-unknown-linux-gnu/latest": "40950c24ba755b6d91bff138c4e8190081b33fde50c396341210fd9144c15930",
+    "1.99.0/aarch64-unknown-linux-gnu/latest": "40950c24ba755b6d91bff138c4e8190081b33fde50c396341210fd9144c15930",
+    "1.99.0/x86_64-unknown-linux-gnu/tokio-1.53": "fdc2620d283bf6b3e046af651498c977a5660d140bcba0e4bc1dd62b71064628",
+    "1.99.0/aarch64-unknown-linux-gnu/tokio-1.53": "fdc2620d283bf6b3e046af651498c977a5660d140bcba0e4bc1dd62b71064628",
+    "1.99.0/x86_64-unknown-linux-gnu/tokio-1.52": "58d0432eeb1ce70897f085d1f5c47231e9c08320fa625de88e3d59f656ceb4db",
+    "1.99.0/aarch64-unknown-linux-gnu/tokio-1.52": "58d0432eeb1ce70897f085d1f5c47231e9c08320fa625de88e3d59f656ceb4db",
+    "1.99.0/x86_64-unknown-linux-gnu/tokio-1.51": "14b78eb35c4e341db9bab055322b60c26d1a9b342d810ec46a7c400ffef76823",
+    "1.99.0/aarch64-unknown-linux-gnu/tokio-1.51": "14b78eb35c4e341db9bab055322b60c26d1a9b342d810ec46a7c400ffef76823",
+    "1.99.0/x86_64-unknown-linux-gnu/reqwest-0.12": "d275b2a5abb676c4bfb79553990e9bcfe43e7740dc23ebaea4a2e6fc6e60674b",
+    "1.99.0/aarch64-unknown-linux-gnu/reqwest-0.12": "d275b2a5abb676c4bfb79553990e9bcfe43e7740dc23ebaea4a2e6fc6e60674b",
+    "1.99.0/x86_64-unknown-linux-gnu/reqwest-0.11": "5c190744c5021c8b36e1e1de30b4d1b78e1c0f1db36e057ba6da52d0488ee5a2",
+    "1.99.0/aarch64-unknown-linux-gnu/reqwest-0.11": "5c190744c5021c8b36e1e1de30b4d1b78e1c0f1db36e057ba6da52d0488ee5a2",
+    "1.99.0/x86_64-unknown-linux-gnu/reqwest-0.10": "084c66035d8752b205ae0f4498956eed4b485009e4cf9eb42c15ebe2802d2e59",
+    "1.99.0/aarch64-unknown-linux-gnu/reqwest-0.10": "084c66035d8752b205ae0f4498956eed4b485009e4cf9eb42c15ebe2802d2e59",
+    "1.99.0/x86_64-unknown-linux-gnu/hyper-1.11": "67990c10c243e657cda5b8a44cea4f1882896008885e34f8e172878ba65dd10b",
+    "1.99.0/aarch64-unknown-linux-gnu/hyper-1.11": "67990c10c243e657cda5b8a44cea4f1882896008885e34f8e172878ba65dd10b",
+    "1.99.0/x86_64-unknown-linux-gnu/hyper-1.10": "c9786738537c1462765fde8f2c312ea040bd8466c32970c443ab8bea863b1f23",
+    "1.99.0/aarch64-unknown-linux-gnu/hyper-1.10": "c9786738537c1462765fde8f2c312ea040bd8466c32970c443ab8bea863b1f23",
+    "1.99.0/x86_64-unknown-linux-gnu/hyper-1.9": "76799f30a720f2295ec879dd7c8455d7829deeb696ab08f0bcfdc48007885551",
+    "1.99.0/aarch64-unknown-linux-gnu/hyper-1.9": "76799f30a720f2295ec879dd7c8455d7829deeb696ab08f0bcfdc48007885551"
+  }
 }

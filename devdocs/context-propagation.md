@@ -428,3 +428,6 @@ Limitations:
    - Go/SSL: uprobes → tpinjector → kprobe
    - Plain HTTP (sockmap): tpinjector → kprobe
    - Non-sockmap: kprobe only
+
+Rust applications using Tokio and Hyper can propagate request context over cleartext
+HTTP/1. See [Rust runtime instrumentation](rust.md).

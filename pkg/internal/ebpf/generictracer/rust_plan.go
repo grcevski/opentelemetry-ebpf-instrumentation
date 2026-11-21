@@ -9,6 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+
+	"go.opentelemetry.io/obi/internal/rustexec"
 )
 
 type rustProbeAlternative map[rustProbeKind][]uint64
@@ -19,7 +22,7 @@ type rustProbeGroup struct {
 	alternatives []rustProbeAlternative
 }
 
-func planRustProbes(symbols rustProbeSymbols) []rustProbeGroup {
+func planRustProbes(symbols rustProbeSymbols, config BpfRustProtocolConfigT) []rustProbeGroup {
 	var groups []rustProbeGroup
 	add := func(name, feature string, addresses map[rustProbeKind][]uint64, alternatives ...[]rustProbeKind) {
 		group := rustProbeGroup{name: name, feature: feature}
@@ -66,6 +69,55 @@ func planRustProbes(symbols rustProbeSymbols) []rustProbeGroup {
 			append([]rustProbeKind{rustTaskSpawn}, scheduling...),
 			append([]rustProbeKind{rustTaskSpawnPublic}, scheduling...))
 	}
+	for _, channel := range symbols.channels {
+		// The symbols are shared by every process of the executable: plan on a copy.
+		channelAddresses := maps.Clone(symbols.channelProbes[channel])
+		channelAddresses[rustHyperRequestReceive] = channelAddresses[rustHyperReceive]
+		alternatives := [][]rustProbeKind{{rustHyperEnqueue, rustHyperDequeue}}
+
+		if config.Message&rustexec.MessageCallback != 0 {
+			alternatives = append(alternatives, []rustProbeKind{rustHyperChanSend, rustHyperReceive}, []rustProbeKind{rustHyperSend, rustHyperReceive})
+		}
+
+		if config.Message&rustexec.MessageList != 0 {
+			alternatives = append(alternatives, []rustProbeKind{rustHyperFindBlock, rustHyperPop})
+		}
+
+		if config.Message&rustexec.MessageRequest != 0 {
+			alternatives = append(alternatives, []rustProbeKind{rustHyperRequestSend, rustHyperRequestReceive})
+		}
+
+		add("Hyper channel "+channel, "channel:"+channel, channelAddresses, alternatives...)
+	}
+
+	if config.Http1 != 0 {
+		add("HTTP/1 header formatting", "http1", addresses, []rustProbeKind{rustHTTP1Headers})
+		add("HTTP/1 original header casing", "http1", addresses, []rustProbeKind{rustHTTP1HeadersOriginal})
+	}
+
+	return groups
+}
+
+func planRustChannelClears(symbols rustProbeSymbols, features map[string]bool) []rustProbeGroup {
+	var groups []rustProbeGroup
+	for _, channel := range symbols.channels {
+		if features["channel:"+channel] {
+			continue
+		}
+
+		var addresses []uint64
+		for _, kind := range []rustProbeKind{rustHyperReceive, rustHyperPop, rustHyperDequeue} {
+			addresses = append(addresses, symbols.channelProbes[channel][kind]...)
+		}
+
+		if len(addresses) > 0 {
+			groups = append(groups, rustProbeGroup{
+				name:    "Unresolved Hyper channel " + channel,
+				feature: "channel-clear:" + channel, alternatives: []rustProbeAlternative{{rustHyperClear: addresses}},
+			})
+		}
+	}
+
 	return groups
 }
 

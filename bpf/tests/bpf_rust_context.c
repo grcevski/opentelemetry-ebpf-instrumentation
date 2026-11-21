@@ -12,7 +12,10 @@ enum { k_entries = 32 };
 typedef struct entry {
     void *map;
     rust_task_key_t key;
-    tp_info_pid_t value;
+    union {
+        tp_info_pid_t value;
+        rust_http_request_t request;
+    };
 } entry_t;
 
 static entry_t entries[k_entries];
@@ -52,7 +55,10 @@ static void *lookup(void *map, const void *key) {
 static long store(void *map, const void *key, const void *value, unsigned long long flags) {
     (void)flags;
     void *existing = lookup(map, key);
-    const u32 size = sizeof(tp_info_pid_t);
+    u32 size = sizeof(tp_info_pid_t);
+    if (map == &rust_http1_requests) {
+        size = sizeof(rust_http_request_t);
+    }
     if (existing) {
         memcpy(existing, value, size);
         return 0;
@@ -111,7 +117,31 @@ int main(void) {
     assert(rust_current_context(ids[1])->response_sent == 1);
     assert(rust_current_context(ids[0])->response_sent == 0);
 
+    // Two messages remain independent even when dequeued in reverse order.
+    const rust_task_key_t slot1 = {.pid = pid, .addr = 1000};
+    const rust_task_key_t slot2 = {.pid = pid, .addr = 2000};
+    rust_copy_context(ids[0], &rust_channel_context, &slot1);
+    const tp_info_pid_t other = {.tp = {.trace_id = {24}}, .valid = 1};
+    rust_set_context(ids[0], &other);
+    rust_copy_context(ids[0], &rust_channel_context, &slot2);
+    rust_adopt_channel_context(ids[1], &slot2);
+    expect_context(1, 24);
+    rust_adopt_channel_context(ids[1], &slot1);
+    expect_context(1, 42);
+    // A per-request message handoff is not marked as possibly ended.
+    assert(rust_current_context(ids[1])->response_sent == 0);
+    assert(!lookup(&rust_channel_context, &slot1));
+
+    // A reused slot and an evicted message must clear the driver's old parent.
     run_task(0, 300);
+    rust_copy_context(ids[0], &rust_channel_context, &slot2);
+    assert(!lookup(&rust_channel_context, &slot2) && "no parent stores no placeholder");
+    rust_adopt_channel_context(ids[1], &slot2);
+    expect_context(1, 0);
+    rust_set_context(ids[1], &parent);
+    rust_adopt_channel_context(ids[1], &slot2);
+    expect_context(1, 0);
+
     // Replacing a task snapshot clears its old parent; invalid poll depth is rejected.
     rust_set_context(ids[1], &parent);
     rust_inherit_task_context(ids[0], &child);
@@ -138,9 +168,21 @@ int main(void) {
     run_task(2, 100);
     assert(!rust_current_context(ids[2]));
     run_task(1, 100);
-    expect_context(1, 42);
+    expect_context(1, 24);
     // The poll probes resolve the same context from the worker state they already hold.
     assert(rust_thread_context(ids[1], &threads[1]) == rust_current_context(ids[1]));
+
+    const rust_http_request_t pending = {.wire = {.span_id = {7}}, .inject = 1};
+    rust_save_request(ids[1], &pending);
+    assert(rust_current_request(ids[1])->wire.span_id[0] == 7);
+    run_task(1, 101);
+    assert(!rust_current_request(ids[1]));
+    run_task(0, 100);
+    assert(rust_current_request(ids[0]));
+    rust_observe_request(ids[0]);
+    assert(!rust_current_request(ids[0]));
+    rust_save_request(ids[0], &pending);
+    assert(rust_current_request(ids[0]));
 
     // A plain thread serves one request at a time: a task it spawns inherits that
     // request, marked as possibly ended. Spawning alone leaves the thread plain.
